@@ -434,7 +434,7 @@ const setupIpcHandlers = () => {
             spawnArgs = ['/c', 'code', projectPath];
           } else {
             // For other IDEs, use normal approach
-            spawnArgs = ['/c', resolvedIDECommand, projectPath];
+            spawnArgs = ['/c', ideCommand, projectPath];
           }
           
           console.log(`Executing command: cmd.exe ${spawnArgs.join(' ')}`);
