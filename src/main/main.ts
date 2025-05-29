@@ -21,6 +21,7 @@ import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import StoreService from './services/store';
 import { ProjectDetectionService } from './services/projectDetection';
+import { AppSettings } from '../types';
 
 class AppUpdater {
   constructor() {
@@ -1057,7 +1058,7 @@ const setupIpcHandlers = () => {
     }
   });
 
-  ipcMain.handle('settings:update', async (event, settings: Partial<{ ideCommand: string; terminalCommand?: string }>) => {
+  ipcMain.handle('settings:update', async (event, settings: Partial<AppSettings>) => {
     try {
       storeService.updateSettings(settings);
       return { success: true };

@@ -4,6 +4,7 @@ import { Project } from '../../types';
 import ScriptsTab from './ScriptsTab';
 import { EnvironmentTab } from './EnvironmentTab';
 import ProjectSettingsTab from './ProjectSettingsTab';
+import SettingsPage from './SettingsPage';
 import { 
   FolderIcon, 
   CodeIcon, 
@@ -34,10 +35,9 @@ const Dashboard: React.FC = () => {  const {
     openInTerminal,
     startDevServer,
     refreshAutoScripts
-  } = useApp();const [showAddModal, setShowAddModal] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  } = useApp();  const [showAddModal, setShowAddModal] = useState(false);
+  const [showSettingsPage, setShowSettingsPage] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
-  const [ideCommand, setIdeCommand] = useState('code');
   const [activeTab, setActiveTab] = useState('overview');
   const handleAddProject = async () => {
     if (!newProjectName.trim()) return;
@@ -55,33 +55,6 @@ const Dashboard: React.FC = () => {  const {
       await removeProject(project.id);
     }
   };
-
-  const loadSettings = async () => {
-    try {
-      const result = await window.electron.settings.get();
-      if (result.success && result.settings) {
-        setIdeCommand(result.settings.ideCommand || 'code');
-      }
-    } catch (error) {
-      console.error('Error loading settings:', error);
-    }
-  };
-
-  const handleSaveSettings = async () => {
-    try {
-      const result = await window.electron.settings.update({ ideCommand });
-      if (result.success) {
-        setShowSettingsModal(false);
-      }
-    } catch (error) {
-      console.error('Error saving settings:', error);
-    }
-  };
-
-  // Load settings when component mounts
-  React.useEffect(() => {
-    loadSettings();
-  }, []);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -151,7 +124,7 @@ const Dashboard: React.FC = () => {  const {
             <span>Explorer</span>
             <button 
               className="settings-btn"
-              onClick={() => setShowSettingsModal(true)}
+              onClick={() => setShowSettingsPage(true)}
               title="Settings"
             >
               <SettingsIcon size={16} />
@@ -417,63 +390,9 @@ const Dashboard: React.FC = () => {  const {
         </div>
       )}
 
-      {/* Settings Modal */}
-      {showSettingsModal && (
-        <div className="modal-overlay" onClick={() => setShowSettingsModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Settings</h3>
-              <button 
-                className="modal-close"
-                onClick={() => setShowSettingsModal(false)}
-                title="Close"
-              >
-                <CloseIcon size={16} />
-              </button>
-            </div>
-            <div className="modal-content">
-              <div className="form-group">
-                <label className="form-label" htmlFor="ideCommand">
-                  IDE Command
-                </label>
-                <input
-                  type="text"
-                  id="ideCommand"
-                  className="form-input"
-                  value={ideCommand}
-                  onChange={(e) => setIdeCommand(e.target.value)}
-                  placeholder="e.g., code, idea, subl"
-                />
-                <div className="form-help">
-                  Command to launch your preferred IDE. Examples:
-                  <ul>
-                    <li><code>code</code> - VS Code</li>
-                    <li><code>idea</code> - IntelliJ IDEA</li>
-                    <li><code>subl</code> - Sublime Text</li>
-                    <li><code>/path/to/your/editor</code> - Custom path</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button 
-                className="btn btn-secondary" 
-                onClick={() => {
-                  setShowSettingsModal(false);
-                  loadSettings(); // Reset to saved values
-                }}
-              >
-                Cancel
-              </button>
-              <button 
-                className="btn btn-primary" 
-                onClick={handleSaveSettings}
-              >
-                Save Settings
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Settings Page */}
+      {showSettingsPage && (
+        <SettingsPage onClose={() => setShowSettingsPage(false)} />
       )}
     </div>
   );

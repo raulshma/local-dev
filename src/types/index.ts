@@ -49,8 +49,30 @@ export interface EnvironmentConfig {
 }
 
 export interface AppSettings {
+  // General settings
+  startupBehavior?: 'last-state' | 'empty' | 'dashboard';
+  autoUpdate?: boolean;
+  checkForUpdatesOnStartup?: boolean;
+  
+  // Appearance settings
+  theme?: 'light' | 'dark' | 'auto' | 'high-contrast';
+  fontSize?: 'small' | 'medium' | 'large';
+  compactMode?: boolean;
+  
+  // Integration settings
   ideCommand: string;
   terminalCommand?: string;
+  gitClientCommand?: string;
+  
+  // Performance settings
+  maxBackgroundProcesses?: number;
+  enableFileWatching?: boolean;
+  cacheSize?: number;
+  
+  // Security settings
+  restrictProjectPaths?: boolean;
+  allowedPaths?: string[];
+  enableSafeMode?: boolean;
 }
 
 export interface AppStore {
