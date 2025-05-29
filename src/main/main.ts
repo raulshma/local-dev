@@ -9,11 +9,12 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
-import { app, BrowserWindow, shell, ipcMain } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
+import StoreService from './services/store';
 
 class AppUpdater {
   constructor() {
@@ -24,12 +25,111 @@ class AppUpdater {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let storeService: StoreService;
 
-ipcMain.on('ipc-example', async (event, arg) => {
-  const msgTemplate = (pingPong: string) => `IPC test: ${pingPong}`;
-  console.log(msgTemplate(arg));
-  event.reply('ipc-example', msgTemplate('pong'));
-});
+// Initialize store service
+const initializeStore = () => {
+  storeService = new StoreService();
+};
+
+// IPC Handlers for project management
+const setupIpcHandlers = () => {
+  // Legacy example handler
+  ipcMain.on('ipc-example', async (event, arg) => {
+    const msgTemplate = (pingPong: string) => `IPC test: ${pingPong}`;
+    console.log(msgTemplate(arg));
+    event.reply('ipc-example', msgTemplate('pong'));
+  });
+
+  // Dialog handlers
+  ipcMain.handle('dialog:select-folder', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openDirectory'],
+      title: 'Select Project Folder',
+    });
+    
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  // Project management handlers
+  ipcMain.handle('project:add', async (event, name: string, projectPath: string) => {
+    try {
+      const project = storeService.addProject(name, projectPath);
+      return project;
+    } catch (error) {
+      console.error('Error adding project:', error);
+      throw new Error(error instanceof Error ? error.message : 'Unknown error');
+    }
+  });
+
+  ipcMain.handle('project:remove', async (event, id: string) => {
+    try {
+      const success = storeService.removeProject(id);
+      if (!success) {
+        throw new Error('Project not found');
+      }
+      return true;
+    } catch (error) {
+      console.error('Error removing project:', error);
+      throw new Error(error instanceof Error ? error.message : 'Unknown error');
+    }
+  });
+
+  ipcMain.handle('project:list', async () => {
+    try {
+      const projects = storeService.getProjects();
+      return projects;
+    } catch (error) {
+      console.error('Error listing projects:', error);
+      throw new Error(error instanceof Error ? error.message : 'Unknown error');
+    }
+  });
+
+  ipcMain.handle('project:select', async (event, id: string) => {
+    try {
+      storeService.setSelectedProjectId(id);
+      const project = storeService.getProject(id);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+      return project;
+    } catch (error) {
+      console.error('Error selecting project:', error);
+      throw new Error(error instanceof Error ? error.message : 'Unknown error');
+    }
+  });
+
+  // Script management handlers
+  ipcMain.handle('project:add-script', async (event, projectId: string, script: { name: string; command: string }) => {
+    try {
+      const newScript = storeService.addScript(projectId, script);
+      return { success: true, script: newScript };
+    } catch (error) {
+      console.error('Error adding script:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('project:remove-script', async (event, projectId: string, scriptId: string) => {
+    try {
+      const success = storeService.removeScript(projectId, scriptId);
+      return { success };
+    } catch (error) {
+      console.error('Error removing script:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('project:update-script', async (event, projectId: string, script: { id: string; name: string; command: string }) => {
+    try {
+      const success = storeService.updateScript(projectId, script);
+      return { success };
+    } catch (error) {
+      console.error('Error updating script:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+};
 
 if (process.env.NODE_ENV === 'production') {
   const sourceMapSupport = require('source-map-support');
@@ -127,6 +227,8 @@ app.on('window-all-closed', () => {
 app
   .whenReady()
   .then(() => {
+    initializeStore();
+    setupIpcHandlers();
     createWindow();
     app.on('activate', () => {
       // On macOS it's common to re-create a window in the app when the

@@ -1,0 +1,146 @@
+import Store from 'electron-store';
+import { v4 as uuidv4 } from 'uuid';
+import { Project, ProjectScript, AppStore, AppSettings } from '../types';
+
+class StoreService {
+  private store: Store<AppStore>;
+
+  constructor() {
+    this.store = new Store<AppStore>({
+      defaults: {
+        projects: [],
+        settings: {
+          ideCommand: 'code', // Default to VS Code
+        },
+        selectedProjectId: null,
+      },
+    });
+  }
+
+  // Project management
+  getProjects(): Project[] {
+    return this.store.get('projects', []);
+  }
+
+  addProject(name: string, path: string): Project {
+    const projects = this.getProjects();
+    const newProject: Project = {
+      id: uuidv4(),
+      name,
+      path,
+      scripts: [],
+      createdAt: new Date().toISOString(),
+    };
+    
+    projects.push(newProject);
+    this.store.set('projects', projects);
+    return newProject;
+  }
+
+  removeProject(id: string): boolean {
+    const projects = this.getProjects();
+    const filteredProjects = projects.filter(p => p.id !== id);
+    
+    if (filteredProjects.length !== projects.length) {
+      this.store.set('projects', filteredProjects);
+      
+      // Clear selection if removing selected project
+      if (this.getSelectedProjectId() === id) {
+        this.setSelectedProjectId(null);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  getProject(id: string): Project | undefined {
+    const projects = this.getProjects();
+    return projects.find(p => p.id === id);
+  }
+
+  updateProject(updatedProject: Project): boolean {
+    const projects = this.getProjects();
+    const index = projects.findIndex(p => p.id === updatedProject.id);
+    
+    if (index !== -1) {
+      projects[index] = updatedProject;
+      this.store.set('projects', projects);
+      return true;
+    }
+    return false;
+  }
+
+  // Project selection
+  getSelectedProjectId(): string | null {
+    return this.store.get('selectedProjectId', null);
+  }
+
+  setSelectedProjectId(id: string | null): void {
+    this.store.set('selectedProjectId', id);
+    
+    // Update last accessed time
+    if (id) {
+      const project = this.getProject(id);
+      if (project) {
+        project.lastAccessed = new Date().toISOString();
+        this.updateProject(project);
+      }
+    }
+  }
+
+  // Script management
+  addScript(projectId: string, script: Omit<ProjectScript, 'id'>): ProjectScript | null {
+    const project = this.getProject(projectId);
+    if (!project) return null;
+
+    const newScript: ProjectScript = {
+      id: uuidv4(),
+      ...script,
+    };
+
+    project.scripts.push(newScript);
+    this.updateProject(project);
+    return newScript;
+  }
+
+  removeScript(projectId: string, scriptId: string): boolean {
+    const project = this.getProject(projectId);
+    if (!project) return false;
+
+    const initialLength = project.scripts.length;
+    project.scripts = project.scripts.filter(s => s.id !== scriptId);
+    
+    if (project.scripts.length !== initialLength) {
+      this.updateProject(project);
+      return true;
+    }
+    return false;
+  }
+
+  updateScript(projectId: string, updatedScript: ProjectScript): boolean {
+    const project = this.getProject(projectId);
+    if (!project) return false;
+
+    const index = project.scripts.findIndex(s => s.id === updatedScript.id);
+    if (index !== -1) {
+      project.scripts[index] = updatedScript;
+      this.updateProject(project);
+      return true;
+    }
+    return false;
+  }
+
+  // Settings
+  getSettings(): AppSettings {
+    return this.store.get('settings', {
+      ideCommand: 'code',
+    });
+  }
+
+  updateSettings(settings: Partial<AppSettings>): void {
+    const currentSettings = this.getSettings();
+    this.store.set('settings', { ...currentSettings, ...settings });
+  }
+}
+
+export default StoreService;
