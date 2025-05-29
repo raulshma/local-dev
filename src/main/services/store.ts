@@ -1,16 +1,15 @@
 import Store from 'electron-store';
 import { v4 as uuidv4 } from 'uuid';
-import { Project, ProjectScript, AppStore, AppSettings } from '../types';
+import { Project, ProjectScript, AppStore, AppSettings, ProjectSettings } from '../types';
 
 class StoreService {
   private store: Store<AppStore>;
 
   constructor() {
-    this.store = new Store<AppStore>({
-      defaults: {
+    this.store = new Store<AppStore>({      defaults: {
         projects: [],
         settings: {
-          ideCommand: 'code', // Default to VS Code
+          ideCommand: 'cursor', // Default to Cursor since it's mentioned in the error
         },
         selectedProjectId: null,
       },
@@ -144,6 +143,31 @@ class StoreService {
   updateSettings(settings: Partial<AppSettings>): void {
     const currentSettings = this.getSettings();
     this.store.set('settings', { ...currentSettings, ...settings });
+  }
+
+  // Project-specific settings
+  getProjectSettings(projectId: string): ProjectSettings {
+    const project = this.getProject(projectId);
+    return project?.settings || {};
+  }
+
+  updateProjectSettings(projectId: string, settings: Partial<ProjectSettings>): boolean {
+    const project = this.getProject(projectId);
+    if (!project) return false;
+
+    project.settings = { ...project.settings, ...settings };
+    return this.updateProject(project);
+  }
+
+  // Get effective settings (project-specific with fallback to global)
+  getEffectiveSettings(projectId: string): { ideCommand: string; terminalCommand?: string } {
+    const projectSettings = this.getProjectSettings(projectId);
+    const globalSettings = this.getSettings();
+    
+    return {
+      ideCommand: projectSettings.ideCommand || globalSettings.ideCommand || 'code',
+      terminalCommand: projectSettings.terminalCommand || globalSettings.terminalCommand,
+    };
   }
 }
 

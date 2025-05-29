@@ -103,6 +103,7 @@
   height: 35px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 16px;
   border-bottom: 1px solid var(--vscode-border);
   font-size: 11px;
@@ -111,6 +112,24 @@
   letter-spacing: 0.1em;
   color: var(--vscode-secondary-foreground);
   background-color: var(--vscode-sidebar-background);
+}
+
+.settings-btn {
+  background: none;
+  border: none;
+  color: var(--vscode-secondary-foreground);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.1s ease;
+}
+
+.settings-btn:hover {
+  background-color: var(--vscode-hover-background);
+  color: var(--vscode-foreground);
 }
 
 .sidebar-content {
@@ -381,11 +400,24 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  text-align: left;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
 }
 
 .action-card:hover {
   background-color: var(--vscode-hover-background);
   border-color: var(--vscode-light-border);
+}
+
+.action-card:focus {
+  outline: 1px solid var(--vscode-accent-blue);
+  outline-offset: -1px;
+}
+
+.action-card:active {
+  background-color: var(--vscode-active-background);
 }
 
 .action-card-icon {
@@ -765,10 +797,34 @@
 
 /* Form help text */
 .form-help {
-  font-size: 11px;
+  margin-top: 8px;
+  font-size: 12px;
   color: var(--vscode-secondary-foreground);
-  margin-top: 4px;
+}
+
+.form-help p {
+  margin: 0 0 8px 0;
+  font-weight: 500;
+}
+
+.form-help ul {
+  margin: 0;
+  padding-left: 16px;
+  list-style-type: disc;
+}
+
+.form-help li {
+  margin: 4px 0;
   line-height: 1.4;
+}
+
+.form-help code {
+  background-color: var(--vscode-text-background);
+  color: var(--vscode-foreground);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: var(--vscode-font-family-monospace, monospace);
+  font-size: 11px;
 }
 
 /* Environment Tab Styles */
@@ -937,15 +993,211 @@
   color: var(--vscode-error-foreground);
 }
 
-/* Responsive adjustments */
-@media (max-width: 768px) {
-  .variables-header,
-  .variable-row {
-    grid-template-columns: 1fr 1fr auto;
-  }
-  
-  .variable-key-input,
-  .variable-value-input {
-    font-size: 12px;
-  }
+/* Project Settings Tab */
+.project-settings-tab {
+  padding: 24px;
+  background-color: var(--vscode-background);
+  color: var(--vscode-foreground);
+  min-height: 100%;
+}
+
+.project-settings-tab h2 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  border-bottom: 1px solid var(--vscode-border);
+  padding-bottom: 8px;
+}
+
+.project-settings-tab h3 {
+  margin: 24px 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.project-settings-tab .settings-description {
+  margin: 0 0 24px 0;
+  font-size: 14px;
+  color: var(--vscode-secondary-foreground);
+  line-height: 1.5;
+}
+
+.project-settings-section {
+  margin-bottom: 32px;
+}
+
+.project-settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.project-setting-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-setting-group label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--vscode-foreground);
+}
+
+.project-setting-group .setting-description {
+  font-size: 12px;
+  color: var(--vscode-secondary-foreground);
+  margin-top: 4px;
+}
+
+.project-setting-input {
+  padding: 8px 12px;
+  border: 1px solid var(--vscode-input-border);
+  background-color: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: var(--vscode-font-family);
+}
+
+.project-setting-input:focus {
+  outline: none;
+  border-color: var(--vscode-focus-border);
+  box-shadow: 0 0 0 2px var(--vscode-focus-border);
+}
+
+.project-setting-input::placeholder {
+  color: var(--vscode-input-placeholder-foreground);
+}
+
+.project-settings-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--vscode-border);
+}
+
+.project-settings-save-btn {
+  background-color: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.2s ease;
+}
+
+.project-settings-save-btn:hover:not(:disabled) {
+  background-color: var(--vscode-button-hover-background);
+}
+
+.project-settings-save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.project-settings-save-btn .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid transparent;
+  border-top: 2px solid currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.project-settings-status {
+  font-size: 12px;
+  color: var(--vscode-secondary-foreground);
+}
+
+.project-settings-error {
+  color: var(--vscode-error-foreground);
+  background-color: var(--vscode-error-background);
+  border: 1px solid var(--vscode-error-border);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-bottom: 16px;
+}
+
+.project-settings-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  color: var(--vscode-secondary-foreground);
+  font-size: 14px;
+  gap: 12px;
+}
+
+.project-settings-loading .spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--vscode-secondary-foreground);
+  border-top: 2px solid var(--vscode-foreground);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.effective-settings {
+  background-color: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-border);
+  border-radius: 4px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.effective-settings-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  margin-bottom: 12px;
+}
+
+.effective-setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--vscode-border);
+}
+
+.effective-setting-item:last-child {
+  border-bottom: none;
+}
+
+.effective-setting-label {
+  font-size: 13px;
+  color: var(--vscode-secondary-foreground);
+}
+
+.effective-setting-value {
+  font-size: 13px;
+  font-family: var(--vscode-font-family-monospace, monospace);
+  color: var(--vscode-foreground);
+  background-color: var(--vscode-text-background);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.settings-note {
+  font-size: 12px;
+  color: var(--vscode-secondary-foreground);
+  font-style: italic;
+  margin-top: 8px;
+  line-height: 1.4;
 }

@@ -3,6 +3,7 @@ import { useApp } from '../contexts/AppContext';
 import { Project } from '../../types';
 import ScriptsTab from './ScriptsTab';
 import { EnvironmentTab } from './EnvironmentTab';
+import ProjectSettingsTab from './ProjectSettingsTab';
 import { 
   FolderIcon, 
   CodeIcon, 
@@ -15,8 +16,7 @@ import {
 } from './Icons';
 import './Dashboard.css';
 
-const Dashboard: React.FC = () => {
-  const { 
+const Dashboard: React.FC = () => {  const { 
     projects, 
     selectedProject, 
     isLoading, 
@@ -28,12 +28,15 @@ const Dashboard: React.FC = () => {
     removeScript,
     updateScript,
     executeScript,
-    stopScript
-  } = useApp();
-  const [showAddModal, setShowAddModal] = useState(false);
+    stopScript,
+    openInIDE,
+    openFolder,
+    openInTerminal
+  } = useApp();  const [showAddModal, setShowAddModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  const [ideCommand, setIdeCommand] = useState('code');
   const [activeTab, setActiveTab] = useState('overview');
-
   const handleAddProject = async () => {
     if (!newProjectName.trim()) return;
     
@@ -50,6 +53,33 @@ const Dashboard: React.FC = () => {
       await removeProject(project.id);
     }
   };
+
+  const loadSettings = async () => {
+    try {
+      const result = await window.electron.settings.get();
+      if (result.success && result.settings) {
+        setIdeCommand(result.settings.ideCommand || 'code');
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    try {
+      const result = await window.electron.settings.update({ ideCommand });
+      if (result.success) {
+        setShowSettingsModal(false);
+      }
+    } catch (error) {
+      console.error('Error saving settings:', error);
+    }
+  };
+
+  // Load settings when component mounts
+  React.useEffect(() => {
+    loadSettings();
+  }, []);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -113,12 +143,17 @@ const Dashboard: React.FC = () => {
           <div className="activity-bar-item" title="Extensions">
             <div className="activity-bar-icon">📦</div>
           </div>
-        </div>
-
-        {/* Sidebar */}
+        </div>        {/* Sidebar */}
         <div className="sidebar">
           <div className="sidebar-header">
-            Explorer
+            <span>Explorer</span>
+            <button 
+              className="settings-btn"
+              onClick={() => setShowSettingsModal(true)}
+              title="Settings"
+            >
+              <SettingsIcon size={16} />
+            </button>
           </div>
           <div className="sidebar-content">            <div className="sidebar-section">
               <div className="section-header">
@@ -190,8 +225,7 @@ const Dashboard: React.FC = () => {
         <div className="main-content">
           {selectedProject ? (
             <>
-              <div className="editor-tabs">
-                <div 
+              <div className="editor-tabs">                <div 
                   className={`tab ${activeTab === 'overview' ? 'active' : ''}`}
                   onClick={() => setActiveTab('overview')}
                 >
@@ -208,6 +242,12 @@ const Dashboard: React.FC = () => {
                   onClick={() => setActiveTab('environment')}
                 >
                   Environment
+                </div>
+                <div 
+                  className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('settings')}
+                >
+                  Settings
                 </div>
               </div>
               <div className="editor-content">
@@ -227,21 +267,28 @@ const Dashboard: React.FC = () => {
                         </div>
                       )}
                     </div>
-                  </div>
-
-                  {activeTab === 'overview' && (
+                  </div>                  {activeTab === 'overview' && (
                     <div className="action-section">
-                      <h2 className="section-title">Quick Actions</h2>                      <div className="action-grid">
-                        <div className="action-card">
+                      <h2 className="section-title">Quick Actions</h2>
+                      <div className="action-grid">
+                        <button 
+                          className="action-card"
+                          onClick={() => openInIDE(selectedProject.id)}
+                          title="Open project in IDE"
+                        >
                           <div className="action-card-icon">
                             <CodeIcon size={20} />
                           </div>
                           <div className="action-card-content">
-                            <div className="action-card-title">Open in VS Code</div>
-                            <div className="action-card-description">Launch VS Code with this project</div>
+                            <div className="action-card-title">Open in IDE</div>
+                            <div className="action-card-description">Launch your preferred IDE with this project</div>
                           </div>
-                        </div>
-                        <div className="action-card">
+                        </button>
+                        <button 
+                          className="action-card"
+                          onClick={() => openFolder(selectedProject.id)}
+                          title="Open project folder"
+                        >
                           <div className="action-card-icon">
                             <FolderIcon size={20} />
                           </div>
@@ -249,8 +296,12 @@ const Dashboard: React.FC = () => {
                             <div className="action-card-title">Open Folder</div>
                             <div className="action-card-description">Open project folder in file explorer</div>
                           </div>
-                        </div>
-                        <div className="action-card">
+                        </button>
+                        <button 
+                          className="action-card"
+                          onClick={() => openInTerminal(selectedProject.id)}
+                          title="Open project in terminal"
+                        >
                           <div className="action-card-icon">
                             <TerminalIcon size={20} />
                           </div>
@@ -258,7 +309,7 @@ const Dashboard: React.FC = () => {
                             <div className="action-card-title">Open Terminal</div>
                             <div className="action-card-description">Launch terminal in project directory</div>
                           </div>
-                        </div>
+                        </button>
                         <div className="action-card">
                           <div className="action-card-icon">
                             <PlayIcon size={20} />
@@ -270,7 +321,7 @@ const Dashboard: React.FC = () => {
                         </div>
                       </div>
                     </div>
-                  )}                  {activeTab === 'scripts' && (
+                  )}{activeTab === 'scripts' && (
                     <ScriptsTab 
                       project={selectedProject}
                       onAddScript={(script) => addScript(selectedProject.id, script)}
@@ -281,6 +332,8 @@ const Dashboard: React.FC = () => {
                     />
                   )}                  {activeTab === 'environment' && (
                     <EnvironmentTab projectId={selectedProject.id} />
+                  )}                  {activeTab === 'settings' && (
+                    <ProjectSettingsTab project={selectedProject} />
                   )}
                 </div>
               </div>
@@ -354,6 +407,64 @@ const Dashboard: React.FC = () => {
                 disabled={!newProjectName.trim()}
               >
                 Select Folder & Add
+              </button>            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="modal-overlay" onClick={() => setShowSettingsModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Settings</h3>
+              <button 
+                className="modal-close"
+                onClick={() => setShowSettingsModal(false)}
+                title="Close"
+              >
+                <CloseIcon size={16} />
+              </button>
+            </div>
+            <div className="modal-content">
+              <div className="form-group">
+                <label className="form-label" htmlFor="ideCommand">
+                  IDE Command
+                </label>
+                <input
+                  type="text"
+                  id="ideCommand"
+                  className="form-input"
+                  value={ideCommand}
+                  onChange={(e) => setIdeCommand(e.target.value)}
+                  placeholder="e.g., code, idea, subl"
+                />
+                <div className="form-help">
+                  Command to launch your preferred IDE. Examples:
+                  <ul>
+                    <li><code>code</code> - VS Code</li>
+                    <li><code>idea</code> - IntelliJ IDEA</li>
+                    <li><code>subl</code> - Sublime Text</li>
+                    <li><code>/path/to/your/editor</code> - Custom path</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => {
+                  setShowSettingsModal(false);
+                  loadSettings(); // Reset to saved values
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleSaveSettings}
+              >
+                Save Settings
               </button>
             </div>
           </div>

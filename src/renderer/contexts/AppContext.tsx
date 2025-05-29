@@ -25,11 +25,18 @@ interface AppContextType {
   stopScript: (projectId: string, scriptId: string) => Promise<void>;
   clearScriptOutput: (scriptId: string) => void;
   toggleScriptOutput: (scriptId: string) => void;
-  
-  // Environment actions
+    // Environment actions
   loadEnvironment: (projectId: string) => Promise<void>;
   saveEnvironment: (projectId: string, variables: Record<string, string>) => Promise<void>;
   backupEnvironment: (projectId: string) => Promise<void>;
+    // Quick actions
+  openInIDE: (projectId: string) => Promise<void>;
+  openFolder: (projectId: string) => Promise<void>;
+  openInTerminal: (projectId: string) => Promise<void>;
+  
+  // Project settings
+  loadProjectSettings: (projectId: string) => Promise<{ projectSettings: any; effectiveSettings: any } | null>;
+  saveProjectSettings: (projectId: string, settings: Partial<{ ideCommand: string; terminalCommand: string }>) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -313,7 +320,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       setEnvironmentLoading(false);
     }
   }, []);
-
   const backupEnvironment = useCallback(async (projectId: string) => {
     setEnvironmentLoading(true);
     setError(null);
@@ -330,6 +336,80 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       setEnvironmentLoading(false);
     }
   }, []);
+  // Quick actions
+  const openInIDE = useCallback(async (projectId: string) => {
+    setError(null);
+    
+    try {
+      const result = await window.electron.actions.openIDE(projectId);
+      if (!result.success) {
+        setError(result.error || 'Failed to open project in IDE');
+      } else if (result.message) {
+        // Show success message if an alternative IDE was used
+        console.info('IDE opened:', result.message);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    }
+  }, []);
+
+  const openFolder = useCallback(async (projectId: string) => {
+    setError(null);
+    
+    try {
+      const result = await window.electron.actions.openFolder(projectId);
+      if (!result.success) {
+        setError(result.error || 'Failed to open project folder');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    }
+  }, []);
+
+  const openInTerminal = useCallback(async (projectId: string) => {
+    setError(null);
+    
+    try {
+      const result = await window.electron.actions.openTerminal(projectId);
+      if (!result.success) {
+        setError(result.error || 'Failed to open project in terminal');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    }
+  }, []);  // Project settings
+  const loadProjectSettings = useCallback(async (projectId: string) => {
+    setError(null);
+    
+    try {
+      const result = await window.electron.project.getSettings(projectId);
+      if (!result.success) {
+        setError(result.error || 'Failed to load project settings');
+        return null;
+      }
+      return {
+        projectSettings: result.projectSettings || {},
+        effectiveSettings: result.effectiveSettings || {}
+      };
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return null;
+    }
+  }, []);
+
+  const saveProjectSettings = useCallback(async (projectId: string, settings: Partial<{ ideCommand: string; terminalCommand: string }>) => {
+    setError(null);
+    
+    try {
+      const result = await window.electron.project.updateSettings(projectId, settings);
+      if (!result.success) {
+        setError(result.error || 'Failed to save project settings');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    }
+  }, []);
+
   const value: AppContextType = {
     projects,
     selectedProject,
@@ -353,6 +433,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     loadEnvironment,
     saveEnvironment,
     backupEnvironment,
+    openInIDE,
+    openFolder,
+    openInTerminal,
+    loadProjectSettings,
+    saveProjectSettings,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

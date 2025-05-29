@@ -1,3 +1,8 @@
+export interface ProjectSettings {
+  ideCommand?: string;
+  terminalCommand?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -5,6 +10,7 @@ export interface Project {
   scripts: ProjectScript[];
   createdAt: string;
   lastAccessed?: string;
+  settings?: ProjectSettings;
 }
 
 export interface ProjectScript {

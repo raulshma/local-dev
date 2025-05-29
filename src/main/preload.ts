@@ -27,6 +27,8 @@ export type Channels =
   | 'project:add-script'
   | 'project:remove-script'
   | 'project:update-script'
+  | 'project:get-settings'
+  | 'project:update-settings'
   | 'script:execute'
   | 'script:stop'
   | 'script:output'
@@ -37,6 +39,8 @@ export type Channels =
   | 'action:open-ide'
   | 'action:open-folder'
   | 'action:open-terminal'
+  | 'settings:get'
+  | 'settings:update'
   | 'dialog:select-folder';
 
 const electronHandler = {
@@ -70,6 +74,18 @@ const electronHandler = {
       ipcRenderer.invoke('project:remove-script', projectId, scriptId),
     updateScript: (projectId: string, script: ProjectScript) => 
       ipcRenderer.invoke('project:update-script', projectId, script),
+    getSettings: (projectId: string) => 
+      ipcRenderer.invoke('project:get-settings', projectId) as Promise<{
+        success: boolean;
+        projectSettings?: { ideCommand?: string; terminalCommand?: string };
+        effectiveSettings?: { ideCommand: string; terminalCommand?: string };
+        error?: string;
+      }>,
+    updateSettings: (projectId: string, settings: Partial<{ ideCommand: string; terminalCommand: string }>) => 
+      ipcRenderer.invoke('project:update-settings', projectId, settings) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
   },
   // Script execution
   script: {
@@ -117,6 +133,39 @@ const electronHandler = {
   // Dialog utilities
   dialog: {
     selectFolder: () => ipcRenderer.invoke('dialog:select-folder') as Promise<string | null>,
+  },
+  // Quick actions
+  actions: {
+    openIDE: (projectId: string) => 
+      ipcRenderer.invoke('action:open-ide', projectId) as Promise<{
+        success: boolean;
+        error?: string;
+        message?: string;
+      }>,
+    openFolder: (projectId: string) => 
+      ipcRenderer.invoke('action:open-folder', projectId) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+    openTerminal: (projectId: string) => 
+      ipcRenderer.invoke('action:open-terminal', projectId) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+  },
+  // Settings
+  settings: {
+    get: () => 
+      ipcRenderer.invoke('settings:get') as Promise<{
+        success: boolean;
+        settings?: { ideCommand: string; terminalCommand?: string };
+        error?: string;
+      }>,
+    update: (settings: Partial<{ ideCommand: string; terminalCommand?: string }>) => 
+      ipcRenderer.invoke('settings:update', settings) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
   },
 };
 

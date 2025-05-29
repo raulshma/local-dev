@@ -12,10 +12,11 @@ import path from 'path';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, exec, execSync } from 'child_process';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import dotenv from 'dotenv';
+import os from 'os';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import StoreService from './services/store';
@@ -362,6 +363,294 @@ const setupIpcHandlers = () => {
         success: false, 
         error: error instanceof Error ? error.message : 'Unknown error' 
       };
+    }
+  });
+
+  // Quick action handlers
+  ipcMain.handle('action:open-ide', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const effectiveSettings = storeService.getEffectiveSettings(projectId);
+      let ideCommand = effectiveSettings.ideCommand;
+      const projectPath = project.path;
+
+      // Helper function to find IDE executable paths on Windows
+      const findIDEPath = (ideCommand: string): string => {
+        if (process.platform !== 'win32') {
+          return ideCommand; // On non-Windows, use the command as-is
+        }
+
+        const commonPaths: Record<string, string[]> = {
+          'code': [
+            'C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
+            'C:\\Program Files\\Microsoft VS Code\\Code.exe',
+            'C:\\Program Files (x86)\\Microsoft VS Code\\Code.exe'
+          ],
+          'cursor': [
+            'C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\cursor\\Cursor.exe',
+            'C:\\Program Files\\Cursor\\Cursor.exe',
+            'C:\\Program Files (x86)\\Cursor\\Cursor.exe'
+          ],
+          'subl': [
+            'C:\\Program Files\\Sublime Text 3\\sublime_text.exe',
+            'C:\\Program Files\\Sublime Text\\sublime_text.exe',
+            'C:\\Program Files (x86)\\Sublime Text 3\\sublime_text.exe'
+          ]
+        };
+
+        const paths = commonPaths[ideCommand.toLowerCase()];
+        if (!paths) return ideCommand;
+
+        for (const path of paths) {
+          const expandedPath = path.replace('%USERNAME%', os.userInfo().username);
+          if (existsSync(expandedPath)) {
+            console.log(`Found IDE at: ${expandedPath}`);
+            return expandedPath;
+          }
+        }
+
+        return ideCommand; // Fallback to original command
+      };
+
+      // Resolve IDE path on Windows
+      ideCommand = findIDEPath(ideCommand);
+
+      // Try to detect and use available IDEs if the configured one fails
+      const availableIDEs = ['code', 'cursor', 'subl', 'atom', 'webstorm'];
+      
+      // Log what IDEs we can find
+      console.log('Checking available IDEs...');
+      for (const ide of availableIDEs) {
+        const resolvedPath = findIDEPath(ide);
+        console.log(`${ide}: ${resolvedPath} ${resolvedPath !== ide ? '(resolved)' : '(command)'}`);
+      }
+      
+      const tryIDE = (command: string): boolean => {
+        try {
+          console.log(`Trying to execute: ${command} "${projectPath}"`);
+          if (process.platform === 'win32') {
+            // On Windows, use a simpler approach with cmd.exe
+            if (command.includes('\\') && existsSync(command)) {
+              // Full path - execute directly with start command to properly detach
+              execSync(`"${command}" "${projectPath}"`, {
+                stdio: 'ignore',
+                timeout: 5000,
+                windowsHide: false
+              });
+              console.log(`Successfully launched IDE: ${command}`);
+              return true;
+            } else {
+              // Command in PATH - use start to launch properly
+              execSync(`start "" ${command} "${projectPath}"`, {
+                stdio: 'ignore',
+                timeout: 5000,
+                windowsHide: true
+              });
+              console.log(`Successfully launched IDE: ${command}`);
+              return true;
+            }
+          } else {
+            // On macOS/Linux, use spawn with proper detachment
+            const result = spawn(command, [projectPath], {
+              detached: true,
+              stdio: 'ignore',
+              env: { ...process.env, PATH: process.env.PATH }
+            });
+            
+            if (result.pid) {
+              result.unref();
+              console.log(`Successfully launched IDE with PID: ${result.pid}`);
+              return true;
+            }
+            return false;
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.log(`Failed to execute "${command}":`, errorMessage);
+          return false;
+        }
+      };
+
+      // First try the configured IDE
+      ideCommand = findIDEPath(ideCommand); // Resolve IDE path on Windows
+      if (tryIDE(ideCommand)) {
+        return { success: true };
+      }
+
+      // If configured IDE failed, try to find an available one
+      console.warn(`IDE command "${ideCommand}" failed, trying to detect available IDEs...`);
+      
+      for (const ide of availableIDEs) {
+        if (ide !== ideCommand) {
+          const resolvedIdePath = findIDEPath(ide);
+          if (tryIDE(resolvedIdePath)) {
+            console.log(`Successfully opened project with ${resolvedIdePath}`);
+            
+            return { 
+              success: true, 
+              message: `Opened with ${ide} (${ideCommand} was not available)` 
+            };
+          }
+        }
+      }
+
+      // If all command line attempts failed, try using shell.openPath as last resort
+      console.warn('All IDE commands failed, trying to open folder with default application...');
+      try {
+        await shell.openPath(projectPath);
+        return { 
+          success: true, 
+          message: 'Opened project folder with default application (IDE commands unavailable from app context)' 
+        };
+      } catch (shellError) {
+        console.error('Shell openPath also failed:', shellError);
+      }
+
+      // If all IDEs failed, provide helpful error message
+      throw new Error(
+        `Could not open project in any IDE. Tried: ${ideCommand}, ${availableIDEs.join(', ')}. ` +
+        `Please ensure at least one IDE is installed and available in your system PATH, or ` +
+        `configure a custom IDE command in project settings. ` +
+        `Note: Commands work fine in terminal but may need full path when run from app.`
+      );
+
+    } catch (error) {
+      console.error('Error opening IDE:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      };
+    }
+  });
+
+  ipcMain.handle('action:open-folder', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const projectPath = project.path;
+
+      // Open the project folder in the default file manager
+      await shell.openPath(projectPath);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error opening folder:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('action:open-terminal', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const effectiveSettings = storeService.getEffectiveSettings(projectId);
+      const projectPath = project.path;
+      const platform = os.platform();
+
+      let command: string;
+      
+      console.log(`Opening terminal for project: ${project.name} at path: ${projectPath}`);
+      
+      // If user has specified a custom terminal command, use it
+      if (effectiveSettings.terminalCommand) {
+        command = `"${effectiveSettings.terminalCommand}" "${projectPath}"`;
+        console.log(`Using custom terminal command: ${command}`);
+      } else {
+        // OS-specific terminal commands
+        switch (platform) {
+          case 'darwin':
+            // macOS
+            command = `open -a Terminal "${projectPath}"`;
+            break;
+          case 'win32':
+            // Windows - prefer PowerShell but fallback to cmd
+            command = `start powershell -NoExit -Command "Set-Location '${projectPath}'"`;
+            break;
+          case 'linux':
+          default:
+            // Linux - try common terminals in order of preference
+            const terminals = ['gnome-terminal', 'konsole', 'xfce4-terminal', 'x-terminal-emulator'];
+            command = `${terminals[0]} --working-directory="${projectPath}"`;
+            break;
+        }
+        console.log(`Using platform-specific terminal command: ${command}`);
+      }
+
+      return new Promise((resolve) => {
+        exec(command, (error) => {
+          if (error) {
+            console.error('Error opening terminal:', error);
+            resolve({ success: false, error: error.message });
+          } else {
+            console.log('Successfully opened terminal');
+            resolve({ success: true });
+          }
+        });
+      });
+
+    } catch (error) {
+      console.error('Error opening terminal:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Settings handlers
+  ipcMain.handle('settings:get', async () => {
+    try {
+      const settings = storeService.getSettings();
+      return { success: true, settings };
+    } catch (error) {
+      console.error('Error getting settings:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('settings:update', async (event, settings: Partial<{ ideCommand: string; terminalCommand?: string }>) => {
+    try {
+      storeService.updateSettings(settings);
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating settings:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Project settings handlers
+  ipcMain.handle('project:get-settings', async (event, projectId: string) => {
+    try {
+      const projectSettings = storeService.getProjectSettings(projectId);
+      const effectiveSettings = storeService.getEffectiveSettings(projectId);
+      return { 
+        success: true, 
+        projectSettings,
+        effectiveSettings
+      };
+    } catch (error) {
+      console.error('Error getting project settings:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('project:update-settings', async (event, projectId: string, settings: Partial<{ ideCommand: string; terminalCommand: string }>) => {
+    try {
+      const success = storeService.updateProjectSettings(projectId, settings);
+      if (!success) {
+        throw new Error('Project not found');
+      }
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating project settings:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
 };
