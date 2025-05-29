@@ -661,3 +661,112 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Scripts Tab Styles */
+.section-header-with-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.scripts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.script-item {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  background: var(--vscode-editor-background);
+  overflow: hidden;
+}
+
+.script-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.script-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.script-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  margin-bottom: 4px;
+}
+
+.script-command {
+  font-size: 12px;
+  color: var(--vscode-secondary-foreground);
+  font-family: var(--vscode-editor-font-family);
+  background: var(--vscode-textCodeBlock-background);
+  padding: 4px 8px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.script-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.script-output {
+  background: var(--vscode-terminal-background);
+  border-top: 1px solid var(--vscode-panel-border);
+}
+
+.script-output-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  background: var(--vscode-panel-background);
+  border-bottom: 1px solid var(--vscode-panel-border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.script-output-content {
+  padding: 16px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.script-output-content pre {
+  margin: 0;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--vscode-terminal-foreground);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Button size variants */
+.btn-xs {
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+.btn-sm {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* Form help text */
+.form-help {
+  font-size: 11px;
+  color: var(--vscode-secondary-foreground);
+  margin-top: 4px;
+  line-height: 1.4;
+}

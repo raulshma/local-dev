@@ -12,6 +12,7 @@ import path from 'path';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
+import { spawn, ChildProcess } from 'child_process';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import StoreService from './services/store';
@@ -26,6 +27,9 @@ class AppUpdater {
 
 let mainWindow: BrowserWindow | null = null;
 let storeService: StoreService;
+
+// Track running processes
+const runningProcesses = new Map<string, ChildProcess>();
 
 // Initialize store service
 const initializeStore = () => {
@@ -128,6 +132,132 @@ const setupIpcHandlers = () => {
       console.error('Error updating script:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
+  });
+
+  // Script execution handlers
+  ipcMain.handle('script:execute', async (event, projectId: string, scriptId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      const script = storeService.getScript(projectId, scriptId);
+      
+      if (!project || !script) {
+        throw new Error('Project or script not found');
+      }
+
+      // Stop existing process if running
+      const processKey = `${projectId}:${scriptId}`;
+      if (runningProcesses.has(processKey)) {
+        const existingProcess = runningProcesses.get(processKey);
+        existingProcess?.kill('SIGTERM');
+        runningProcesses.delete(processKey);
+      }
+
+      // Parse command and arguments
+      const commandParts = script.command.split(' ');
+      const command = commandParts[0];
+      const args = commandParts.slice(1);
+
+      // Start new process
+      const childProcess = spawn(command, args, {
+        cwd: project.path,
+        shell: true,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      // Store process reference
+      runningProcesses.set(processKey, childProcess);
+
+      // Set up output streaming
+      childProcess.stdout?.on('data', (data) => {
+        if (mainWindow) {
+          mainWindow.webContents.send('script:output', {
+            projectId,
+            scriptId,
+            type: 'stdout',
+            data: data.toString()
+          });
+        }
+      });
+
+      childProcess.stderr?.on('data', (data) => {
+        if (mainWindow) {
+          mainWindow.webContents.send('script:output', {
+            projectId,
+            scriptId,
+            type: 'stderr',
+            data: data.toString()
+          });
+        }
+      });
+
+      childProcess.on('close', (code) => {
+        runningProcesses.delete(processKey);
+        if (mainWindow) {
+          mainWindow.webContents.send('script:status', {
+            projectId,
+            scriptId,
+            status: 'stopped',
+            exitCode: code
+          });
+        }
+      });
+
+      childProcess.on('error', (error) => {
+        runningProcesses.delete(processKey);
+        if (mainWindow) {
+          mainWindow.webContents.send('script:status', {
+            projectId,
+            scriptId,
+            status: 'error',
+            error: error.message
+          });
+        }
+      });
+
+      // Send started status
+      if (mainWindow) {
+        mainWindow.webContents.send('script:status', {
+          projectId,
+          scriptId,
+          status: 'running'
+        });
+      }
+
+      return { success: true, pid: childProcess.pid };
+    } catch (error) {
+      console.error('Error executing script:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('script:stop', async (event, projectId: string, scriptId: string) => {
+    try {
+      const processKey = `${projectId}:${scriptId}`;
+      const process = runningProcesses.get(processKey);
+      
+      if (!process) {
+        return { success: false, error: 'Process not found' };
+      }
+
+      process.kill('SIGTERM');
+      
+      // Force kill after 5 seconds if not terminated
+      setTimeout(() => {
+        if (runningProcesses.has(processKey)) {
+          process.kill('SIGKILL');
+        }
+      }, 5000);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error stopping script:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('script:is-running', async (event, projectId: string, scriptId: string) => {
+    const processKey = `${projectId}:${scriptId}`;
+    return runningProcesses.has(processKey);
   });
 };
 

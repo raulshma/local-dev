@@ -69,6 +69,27 @@ const electronHandler = {
     updateScript: (projectId: string, script: ProjectScript) => 
       ipcRenderer.invoke('project:update-script', projectId, script),
   },
+  // Script execution
+  script: {
+    execute: (projectId: string, scriptId: string) => 
+      ipcRenderer.invoke('script:execute', projectId, scriptId),
+    stop: (projectId: string, scriptId: string) => 
+      ipcRenderer.invoke('script:stop', projectId, scriptId),
+    isRunning: (projectId: string, scriptId: string) => 
+      ipcRenderer.invoke('script:is-running', projectId, scriptId) as Promise<boolean>,
+    onOutput: (callback: (data: { projectId: string; scriptId: string; type: 'stdout' | 'stderr'; data: string }) => void) => {
+      ipcRenderer.on('script:output', (_event, data) => callback(data));
+    },
+    onStatus: (callback: (data: { projectId: string; scriptId: string; status: 'running' | 'stopped' | 'error'; exitCode?: number; error?: string }) => void) => {
+      ipcRenderer.on('script:status', (_event, data) => callback(data));
+    },
+    removeOutputListener: () => {
+      ipcRenderer.removeAllListeners('script:output');
+    },
+    removeStatusListener: () => {
+      ipcRenderer.removeAllListeners('script:status');
+    },
+  },
   // Dialog utilities
   dialog: {
     selectFolder: () => ipcRenderer.invoke('dialog:select-folder') as Promise<string | null>,

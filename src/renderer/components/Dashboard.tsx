@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { Project } from '../../types';
+import ScriptsTab from './ScriptsTab';
 import { 
   FolderIcon, 
   CodeIcon, 
@@ -14,7 +15,20 @@ import {
 import './Dashboard.css';
 
 const Dashboard: React.FC = () => {
-  const { projects, selectedProject, isLoading, error, addProject, removeProject, selectProject } = useApp();
+  const { 
+    projects, 
+    selectedProject, 
+    isLoading, 
+    error, 
+    addProject, 
+    removeProject, 
+    selectProject,
+    addScript,
+    removeScript,
+    updateScript,
+    executeScript,
+    stopScript
+  } = useApp();
   const [showAddModal, setShowAddModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
@@ -255,20 +269,15 @@ const Dashboard: React.FC = () => {
                         </div>
                       </div>
                     </div>
-                  )}
-
-                  {activeTab === 'scripts' && (
-                    <div className="action-section">
-                      <h2 className="section-title">Available Scripts</h2>                      <div className="empty-state">
-                        <div className="empty-state-icon">
-                          <SettingsIcon size={48} color="var(--vscode-secondary-foreground)" />
-                        </div>
-                        <div className="empty-state-title">Script Management</div>
-                        <div className="empty-state-description">
-                          Script detection and management features are coming soon.
-                        </div>
-                      </div>
-                    </div>
+                  )}                  {activeTab === 'scripts' && (
+                    <ScriptsTab 
+                      project={selectedProject}
+                      onAddScript={(script) => addScript(selectedProject.id, script)}
+                      onRemoveScript={(scriptId) => removeScript(selectedProject.id, scriptId)}
+                      onUpdateScript={(script) => updateScript(selectedProject.id, script)}
+                      onExecuteScript={(scriptId) => executeScript(selectedProject.id, scriptId)}
+                      onStopScript={(scriptId) => stopScript(selectedProject.id, scriptId)}
+                    />
                   )}
 
                   {activeTab === 'environment' && (

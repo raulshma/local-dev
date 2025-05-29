@@ -76,6 +76,18 @@ export const ChevronDownIcon: React.FC<IconProps> = ({ size = 16, color = 'curre
   </svg>
 );
 
+export const ChevronUpIcon: React.FC<IconProps> = ({ size = 16, color = 'currentColor', className }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill={color} className={className}>
+    <path d="M11.573 6.427L8 10l-3.573-3.573.618-.618L8 8.764l2.955-2.955.618.618z"/>
+  </svg>
+);
+
+export const EditIcon: React.FC<IconProps> = ({ size = 16, color = 'currentColor', className }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill={color} className={className}>
+    <path d="M13.23 1h-1.46L3.52 9.25l-.16.22L1 13.59 2.41 15l4.12-2.36.22-.16L15 4.23V2.77L13.23 1zM2.41 13.59l1.51-3 1.45 1.45-2.96 1.55zm2.69-2.31L4.92 11l7.94-7.94.18.18L5.1 11.28zm8.55-8.55l-.18-.18.18-.18.18.18-.18.18zM13 3.41l-.18-.18.18-.18.18.18-.18.18z"/>
+  </svg>
+);
+
 export const ChevronRightIcon: React.FC<IconProps> = ({ size = 16, color = 'currentColor', className }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill={color} className={className}>
     <path d="M6.427 4.427L10 8l-3.573 3.573-.618-.618L8.764 8 5.809 5.045l.618-.618z"/>

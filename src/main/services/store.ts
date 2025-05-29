@@ -102,13 +102,18 @@ class StoreService {
     this.updateProject(project);
     return newScript;
   }
-
+  getScript(projectId: string, scriptId: string): ProjectScript | null {
+    const project = this.getProject(projectId);
+    if (!project) return null;
+    
+    return project.scripts.find((s: ProjectScript) => s.id === scriptId) || null;
+  }
   removeScript(projectId: string, scriptId: string): boolean {
     const project = this.getProject(projectId);
     if (!project) return false;
 
     const initialLength = project.scripts.length;
-    project.scripts = project.scripts.filter(s => s.id !== scriptId);
+    project.scripts = project.scripts.filter((s: ProjectScript) => s.id !== scriptId);
     
     if (project.scripts.length !== initialLength) {
       this.updateProject(project);
@@ -116,12 +121,11 @@ class StoreService {
     }
     return false;
   }
-
   updateScript(projectId: string, updatedScript: ProjectScript): boolean {
     const project = this.getProject(projectId);
     if (!project) return false;
 
-    const index = project.scripts.findIndex(s => s.id === updatedScript.id);
+    const index = project.scripts.findIndex((s: ProjectScript) => s.id === updatedScript.id);
     if (index !== -1) {
       project.scripts[index] = updatedScript;
       this.updateProject(project);

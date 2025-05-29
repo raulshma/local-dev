@@ -1,17 +1,28 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Project } from '../../types';
+import { Project, ProjectScript, ScriptOutput, ScriptStatus } from '../../types';
 
 interface AppContextType {
   projects: Project[];
   selectedProject: Project | null;
   isLoading: boolean;
   error: string | null;
+  runningScripts: Set<string>;
+  scriptOutput: { [scriptId: string]: { output: string; isVisible: boolean } };
   
   // Actions
   loadProjects: () => Promise<void>;
   addProject: (name: string, path: string) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
   selectProject: (id: string) => Promise<void>;
+  
+  // Script actions
+  addScript: (projectId: string, script: { name: string; command: string }) => Promise<void>;
+  removeScript: (projectId: string, scriptId: string) => Promise<void>;
+  updateScript: (projectId: string, script: ProjectScript) => Promise<void>;
+  executeScript: (projectId: string, scriptId: string) => Promise<void>;
+  stopScript: (projectId: string, scriptId: string) => Promise<void>;
+  clearScriptOutput: (scriptId: string) => void;
+  toggleScriptOutput: (scriptId: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -33,6 +44,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [runningScripts, setRunningScripts] = useState<Set<string>>(new Set());
+  const [scriptOutput, setScriptOutput] = useState<{ [scriptId: string]: { output: string; isVisible: boolean } }>({});
 
   const loadProjects = async () => {
     setIsLoading(true);
@@ -94,6 +107,152 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     }
   };
 
+  const addScript = async (projectId: string, script: { name: string; command: string }) => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      await window.electron.project.addScript(projectId, script);
+      await loadProjects(); // Reload to get updated project with new script
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const removeScript = async (projectId: string, scriptId: string) => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      await window.electron.project.removeScript(projectId, scriptId);
+      await loadProjects(); // Reload to get updated project
+      // Clear script output if it exists
+      setScriptOutput(prev => {
+        const newOutput = { ...prev };
+        delete newOutput[scriptId];
+        return newOutput;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updateScript = async (projectId: string, script: ProjectScript) => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      await window.electron.project.updateScript(projectId, script);
+      await loadProjects(); // Reload to get updated project
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const executeScript = async (projectId: string, scriptId: string) => {
+    setError(null);
+    
+    try {
+      await window.electron.script.execute(projectId, scriptId);
+      setRunningScripts(prev => new Set(prev).add(`${projectId}:${scriptId}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    }
+  };
+
+  const stopScript = async (projectId: string, scriptId: string) => {
+    setError(null);
+    
+    try {
+      await window.electron.script.stop(projectId, scriptId);
+      setRunningScripts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(`${projectId}:${scriptId}`);
+        return newSet;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    }
+  };
+
+  const clearScriptOutput = (scriptId: string) => {
+    setScriptOutput(prev => ({
+      ...prev,
+      [scriptId]: { output: '', isVisible: prev[scriptId]?.isVisible ?? false }
+    }));
+  };
+
+  const toggleScriptOutput = (scriptId: string) => {
+    setScriptOutput(prev => ({
+      ...prev,
+      [scriptId]: { 
+        output: prev[scriptId]?.output ?? '', 
+        isVisible: !prev[scriptId]?.isVisible 
+      }
+    }));
+  };
+
+  // Set up script output and status listeners
+  useEffect(() => {
+    const handleScriptOutput = (data: ScriptOutput) => {
+      setScriptOutput(prev => ({
+        ...prev,
+        [data.scriptId]: {
+          output: (prev[data.scriptId]?.output ?? '') + data.data,
+          isVisible: prev[data.scriptId]?.isVisible ?? false
+        }
+      }));
+    };
+
+    const handleScriptStatus = (data: ScriptStatus) => {
+      const processKey = `${data.projectId}:${data.scriptId}`;
+      
+      if (data.status === 'running') {
+        setRunningScripts(prev => new Set(prev).add(processKey));
+      } else {
+        setRunningScripts(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(processKey);
+          return newSet;
+        });
+      }
+
+      if (data.status === 'stopped') {
+        const exitMessage = `\n[Process exited with code ${data.exitCode ?? 0}]\n`;
+        setScriptOutput(prev => ({
+          ...prev,
+          [data.scriptId]: {
+            output: (prev[data.scriptId]?.output ?? '') + exitMessage,
+            isVisible: prev[data.scriptId]?.isVisible ?? false
+          }
+        }));
+      } else if (data.status === 'error') {
+        const errorMessage = `\n[Error: ${data.error}]\n`;
+        setScriptOutput(prev => ({
+          ...prev,
+          [data.scriptId]: {
+            output: (prev[data.scriptId]?.output ?? '') + errorMessage,
+            isVisible: prev[data.scriptId]?.isVisible ?? false
+          }
+        }));
+      }
+    };
+
+    window.electron.script.onOutput(handleScriptOutput);
+    window.electron.script.onStatus(handleScriptStatus);
+
+    return () => {
+      window.electron.script.removeOutputListener();
+      window.electron.script.removeStatusListener();
+    };
+  }, []);
+
   // Load projects on component mount
   useEffect(() => {
     loadProjects();
@@ -104,10 +263,19 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     selectedProject,
     isLoading,
     error,
+    runningScripts,
+    scriptOutput,
     loadProjects,
     addProject,
     removeProject,
     selectProject,
+    addScript,
+    removeScript,
+    updateScript,
+    executeScript,
+    stopScript,
+    clearScriptOutput,
+    toggleScriptOutput,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
