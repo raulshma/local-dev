@@ -423,20 +423,26 @@ const setupIpcHandlers = () => {
         const resolvedIDECommand = findIDEPath(ideCommand);
 
         try {
-          console.log(`Attempting to open IDE using cmd start: ${resolvedIDECommand} with path: ${projectPath}`);
+          console.log(`Attempting to open IDE: ${resolvedIDECommand} with path: ${projectPath}`);
           
-          // Use cmd.exe with start command to launch the IDE in a clean environment
-          // This avoids inheriting Node.js environment variables that cause module resolution issues
-          const ideProcess = spawn('cmd.exe', [
-            '/c', 
-            'start', 
-            '""',  // Empty window title
-            resolvedIDECommand, 
-            `"${projectPath}"`
-          ], {
+          // Special handling for different IDE commands
+          let spawnArgs: string[] = [];
+          
+          if (ideCommand.toLowerCase() === 'code') {
+            // For VS Code, we'll use a simple approach without start command
+            // Just running 'code' with the path argument directly
+            spawnArgs = ['/c', 'code', projectPath];
+          } else {
+            // For other IDEs, use normal approach
+            spawnArgs = ['/c', resolvedIDECommand, projectPath];
+          }
+          
+          console.log(`Executing command: cmd.exe ${spawnArgs.join(' ')}`);
+          
+          const ideProcess = spawn('cmd.exe', spawnArgs, {
             stdio: 'ignore',  // Don't inherit stdio to avoid Node.js environment bleeding
             detached: true,   // Detach the process completely
-            windowsHide: true, // Hide the cmd window
+            windowsHide: false, // Hide the cmd window
             env: {
               // Only pass essential environment variables, not the full Node.js environment
               PATH: process.env.PATH,
