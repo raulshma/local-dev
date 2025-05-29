@@ -44,11 +44,22 @@
 
 ### 3.2. Script Execution & Control (Per Selected Project)
 
+*   **FR2.0: Automatic Script Detection**
+    *   **Action (Main Process):** When a project is added, automatically detect available scripts based on project type:
+        *   **JavaScript/Node.js:** Parse `package.json` "scripts" section and auto-populate common scripts (dev, start, build, test, lint, etc.)
+        *   **Python:** Detect common Python commands based on project structure:
+            *   Django: `python manage.py runserver`, `python manage.py migrate`, `python manage.py test`
+            *   Flask/FastAPI: `python app.py`, `python main.py`, `uvicorn main:app --reload`
+            *   General: `python -m pytest`, `pip install -r requirements.txt`
+        *   **ASP.NET/C#:** Detect .NET commands: `dotnet run`, `dotnet build`, `dotnet test`, `dotnet watch run`
+        *   **Other project types:** Extend detection logic as needed
+    *   **Storage:** Auto-detected scripts should be stored alongside manually defined scripts in `electron-store`
+    *   **UI:** Display auto-detected scripts with a visual indicator (e.g., icon or badge) to distinguish them from manually created scripts
 *   **FR2.1: Define Custom Scripts**
-    *   **UI:** In the context of a selected project, provide an interface to define multiple custom scripts. Each script definition requires:
+    *   **UI:** In the context of a selected project, provide an interface to define additional custom scripts beyond the auto-detected ones. Each script definition requires:
         *   A user-friendly "Script Name" (e.g., "Start API Server," "Run Frontend Tests").
         *   The exact "Command" string to execute (e.g., `npm run dev`, `yarn test`, `python manage.py runserver`).
-    *   **Storage:** Script definitions should be stored as part of the project's configuration in `electron-store`.
+    *   **Storage:** Custom script definitions should be stored as part of the project's configuration in `electron-store`, separate from auto-detected scripts.
 *   **FR2.2: Execute Scripts**
     *   **UI:** For each defined script, display a "Run" button.
     *   **Action (Main Process):**
@@ -88,7 +99,20 @@
 *   **FR4.2: Open Project Folder**
     *   **UI:** A button "Open Folder."
     *   **Action (Main Process):** Use `shell.openPath(projectPath)`.
-*   **FR4.3: Open Project in Native Terminal**
+*   **FR4.3: Intelligent Project Detection & Development Server**
+    *   **UI:** A button "Start Dev" that automatically detects and starts the appropriate development server for the project.
+    *   **Project Detection (Main Process):** Automatically detect project type by analyzing project files:
+        *   **JavaScript/Node.js:** Check for `package.json`, then prioritize commands: `npm run dev`, `npm run start`, `yarn dev`, `yarn start`, `pnpm dev`, `pnpm start`
+        *   **Python:** Check for `requirements.txt`, `pyproject.toml`, `setup.py`, `manage.py` (Django), `app.py`/`main.py` (Flask/FastAPI), then use appropriate commands: `python manage.py runserver`, `python app.py`, `python main.py`, `uvicorn main:app --reload`, `flask run`
+        *   **ASP.NET/C#:** Check for `*.csproj`, `*.sln`, then use: `dotnet run`, `dotnet watch run`
+        *   **Other frameworks:** Extend detection for additional project types as needed
+    *   **Action (Main Process):** 
+        1. Scan project directory for identifying files/patterns
+        2. Determine the most appropriate development command based on detected project type
+        3. Execute the command using `child_process.spawn` with proper working directory
+        4. Provide fallback to manual script definition if auto-detection fails
+    *   **Feedback:** Display detected project type and command being executed. Allow user to override auto-detected command if needed.
+*   **FR4.4: Open Project in Native Terminal**
     *   **UI:** A button "Open in Terminal."
     *   **Action (Main Process):** Execute the OS-specific command to open a new terminal window at the `projectPath`.
         *   macOS: `open -a Terminal "${projectPath}"`
