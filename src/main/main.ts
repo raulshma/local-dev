@@ -14,7 +14,7 @@ import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import { spawn, ChildProcess, exec, execSync } from 'child_process';
 import fs from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, writeFileSync } from 'fs';
 import dotenv from 'dotenv';
 import os from 'os';
 import MenuBuilder from './menu';
@@ -375,8 +375,10 @@ const setupIpcHandlers = () => {
       }
 
       const effectiveSettings = storeService.getEffectiveSettings(projectId);
-      let ideCommand = effectiveSettings.ideCommand;
+      let ideCommand = effectiveSettings.ideCommand || 'code'; // Default to VS Code
       const projectPath = project.path;
+
+      console.log(`Attempting to open project at ${projectPath} with IDE command: ${ideCommand}`);
 
       // Helper function to find IDE executable paths on Windows
       const findIDEPath = (ideCommand: string): string => {
@@ -416,108 +418,80 @@ const setupIpcHandlers = () => {
         return ideCommand; // Fallback to original command
       };
 
-      // Resolve IDE path on Windows
-      ideCommand = findIDEPath(ideCommand);
+      // On Windows platform, try to open project using a batch file
+      if (process.platform === 'win32') {
+        const resolvedIDECommand = findIDEPath(ideCommand);
 
-      // Try to detect and use available IDEs if the configured one fails
-      const availableIDEs = ['code', 'cursor', 'subl', 'atom', 'webstorm'];
-      
-      // Log what IDEs we can find
-      console.log('Checking available IDEs...');
-      for (const ide of availableIDEs) {
-        const resolvedPath = findIDEPath(ide);
-        console.log(`${ide}: ${resolvedPath} ${resolvedPath !== ide ? '(resolved)' : '(command)'}`);
-      }
-      
-      const tryIDE = (command: string): boolean => {
         try {
-          console.log(`Trying to execute: ${command} "${projectPath}"`);
-          if (process.platform === 'win32') {
-            // On Windows, use a simpler approach with cmd.exe
-            if (command.includes('\\') && existsSync(command)) {
-              // Full path - execute directly with start command to properly detach
-              execSync(`"${command}" "${projectPath}"`, {
-                stdio: 'ignore',
-                timeout: 5000,
-                windowsHide: false
-              });
-              console.log(`Successfully launched IDE: ${command}`);
-              return true;
-            } else {
-              // Command in PATH - use start to launch properly
-              execSync(`start "" ${command} "${projectPath}"`, {
-                stdio: 'ignore',
-                timeout: 5000,
-                windowsHide: true
-              });
-              console.log(`Successfully launched IDE: ${command}`);
-              return true;
+          console.log(`Attempting to open IDE using cmd start: ${resolvedIDECommand} with path: ${projectPath}`);
+          
+          // Use cmd.exe with start command to launch the IDE in a clean environment
+          // This avoids inheriting Node.js environment variables that cause module resolution issues
+          const ideProcess = spawn('cmd.exe', [
+            '/c', 
+            'start', 
+            '""',  // Empty window title
+            resolvedIDECommand, 
+            `"${projectPath}"`
+          ], {
+            stdio: 'ignore',  // Don't inherit stdio to avoid Node.js environment bleeding
+            detached: true,   // Detach the process completely
+            windowsHide: true, // Hide the cmd window
+            env: {
+              // Only pass essential environment variables, not the full Node.js environment
+              PATH: process.env.PATH,
+              USERPROFILE: process.env.USERPROFILE,
+              APPDATA: process.env.APPDATA,
+              LOCALAPPDATA: process.env.LOCALAPPDATA,
+              // Explicitly exclude Node.js related environment variables
+              // that might be causing the ts-node/register issue
             }
-          } else {
-            // On macOS/Linux, use spawn with proper detachment
-            const result = spawn(command, [projectPath], {
-              detached: true,
-              stdio: 'ignore',
-              env: { ...process.env, PATH: process.env.PATH }
-            });
-            
-            if (result.pid) {
-              result.unref();
-              console.log(`Successfully launched IDE with PID: ${result.pid}`);
-              return true;
-            }
-            return false;
+          });
+
+          if (ideProcess.pid) {
+            ideProcess.unref();
+            console.log(`Successfully launched IDE process with PID: ${ideProcess.pid}`);
+            return { success: true, message: "IDE launched using cmd start with clean environment." };
           }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.log(`Failed to execute "${command}":`, errorMessage);
-          return false;
+          throw new Error('Failed to start IDE process: No PID obtained.');
+        } catch (directSpawnError) {
+          console.error('Error directly spawning IDE:', directSpawnError);
+
+          // Fallback to shell.openPath if direct spawn fails
+          console.log('Attempting to open with shell.openPath as a fallback.');
+          await shell.openPath(projectPath);
+          return {
+            success: true,
+            message: 'Opened project folder with default application (IDE command failed)'
+          };
         }
-      };
-
-      // First try the configured IDE
-      ideCommand = findIDEPath(ideCommand); // Resolve IDE path on Windows
-      if (tryIDE(ideCommand)) {
-        return { success: true };
-      }
-
-      // If configured IDE failed, try to find an available one
-      console.warn(`IDE command "${ideCommand}" failed, trying to detect available IDEs...`);
-      
-      for (const ide of availableIDEs) {
-        if (ide !== ideCommand) {
-          const resolvedIdePath = findIDEPath(ide);
-          if (tryIDE(resolvedIdePath)) {
-            console.log(`Successfully opened project with ${resolvedIdePath}`);
-            
-            return { 
-              success: true, 
-              message: `Opened with ${ide} (${ideCommand} was not available)` 
-            };
+      } else {
+        // For non-Windows platforms, use shell.openPath or a direct command if appropriate
+        // This part of the logic can be refined based on how other OSes are handled
+        console.log(`Attempting to open project on non-Windows platform with: ${ideCommand} ${projectPath}`);
+        try {
+          // Attempt to spawn directly for non-windows too, assuming command is in PATH
+          const ideProcess = spawn(ideCommand, [projectPath], {
+            detached: true,
+            stdio: 'ignore',
+            shell: true // Use shell for consistency and PATH resolution
+          });
+          if (ideProcess.pid) {
+            ideProcess.unref();
+            console.log(`Successfully launched IDE process with PID: ${ideProcess.pid} on non-Windows`);
+            return { success: true };
           }
+          throw new Error('Failed to start IDE process on non-Windows: No PID obtained.');
+        } catch (nonWindowsError) {
+          console.error('Error spawning IDE on non-Windows:', nonWindowsError);
+          console.log('Falling back to shell.openPath on non-Windows.');
+          await shell.openPath(projectPath); // Fallback for non-windows
+          return {
+            success: true,
+            message: 'Opened project folder with default application (IDE command failed)'
+          };
         }
       }
-
-      // If all command line attempts failed, try using shell.openPath as last resort
-      console.warn('All IDE commands failed, trying to open folder with default application...');
-      try {
-        await shell.openPath(projectPath);
-        return { 
-          success: true, 
-          message: 'Opened project folder with default application (IDE commands unavailable from app context)' 
-        };
-      } catch (shellError) {
-        console.error('Shell openPath also failed:', shellError);
-      }
-
-      // If all IDEs failed, provide helpful error message
-      throw new Error(
-        `Could not open project in any IDE. Tried: ${ideCommand}, ${availableIDEs.join(', ')}. ` +
-        `Please ensure at least one IDE is installed and available in your system PATH, or ` +
-        `configure a custom IDE command in project settings. ` +
-        `Note: Commands work fine in terminal but may need full path when run from app.`
-      );
-
     } catch (error) {
       console.error('Error opening IDE:', error);
       return { 
@@ -557,45 +531,87 @@ const setupIpcHandlers = () => {
       const projectPath = project.path;
       const platform = os.platform();
 
-      let command: string;
-      
       console.log(`Opening terminal for project: ${project.name} at path: ${projectPath}`);
       
-      // If user has specified a custom terminal command, use it
-      if (effectiveSettings.terminalCommand) {
-        command = `"${effectiveSettings.terminalCommand}" "${projectPath}"`;
-        console.log(`Using custom terminal command: ${command}`);
-      } else {
-        // OS-specific terminal commands
-        switch (platform) {
-          case 'darwin':
-            // macOS
-            command = `open -a Terminal "${projectPath}"`;
-            break;
-          case 'win32':
-            // Windows - prefer PowerShell but fallback to cmd
-            command = `start powershell -NoExit -Command "Set-Location '${projectPath}'"`;
-            break;
-          case 'linux':
-          default:
-            // Linux - try common terminals in order of preference
-            const terminals = ['gnome-terminal', 'konsole', 'xfce4-terminal', 'x-terminal-emulator'];
-            command = `${terminals[0]} --working-directory="${projectPath}"`;
-            break;
-        }
-        console.log(`Using platform-specific terminal command: ${command}`);
-      }
-
       return new Promise((resolve) => {
-        exec(command, (error) => {
-          if (error) {
-            console.error('Error opening terminal:', error);
-            resolve({ success: false, error: error.message });
+        try {
+          if (platform === 'win32') {
+            // On Windows, use a more reliable approach
+            const terminalCommand = effectiveSettings.terminalCommand || 'powershell.exe';
+            const command = `start "" "${terminalCommand}" -NoExit -Command "cd '${projectPath.replace(/\\/g, '\\')}'"`;
+            console.log(`Executing command: ${command}`);
+            
+            const result = spawn('cmd.exe', ['/c', command], {
+              detached: true,
+              stdio: 'ignore',
+              shell: true,
+              windowsHide: true
+            });
+            
+            result.on('error', (error) => {
+              console.error('Failed to open terminal:', error);
+              resolve({ success: false, error: error.message });
+            });
+            
+            // Give it a moment to start
+            setTimeout(() => {
+              try {
+                if (result.pid) {
+                  process.kill(result.pid, 0);
+                  console.log('Successfully opened terminal');
+                  resolve({ success: true });
+                } else {
+                  throw new Error('No process ID available');
+                }
+              } catch (e) {
+                console.error('Terminal process failed to start');
+                resolve({ 
+                  success: false, 
+                  error: 'Failed to start terminal. Make sure the terminal application is installed.' 
+                });
+              }
+            }, 1000);
+            
           } else {
+            // For non-Windows platforms (macOS/Linux)
+            let command: string;
+            if (effectiveSettings.terminalCommand) {
+              command = `cd "${projectPath}" && ${effectiveSettings.terminalCommand}`;
+            } else {
+              // Default terminal commands for different platforms
+              const terminals = {
+                darwin: `open -a Terminal "${projectPath}"`,
+                linux: `gnome-terminal --working-directory="${projectPath}"`,
+                default: `cd "${projectPath}" && $SHELL`
+              };
+              command = terminals[platform as keyof typeof terminals] || terminals.default;
+            }
+            
+            console.log(`Executing command: ${command}`);
+            
+            const result = spawn(command, {
+              shell: true,
+              detached: true,
+              stdio: 'ignore'
+            });
+            
+            result.on('error', (error) => {
+              console.error('Failed to open terminal:', error);
+              resolve({ success: false, error: error.message });
+            });
+            
+            result.unref();
             console.log('Successfully opened terminal');
             resolve({ success: true });
           }
-        });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error('Error opening terminal:', errorMessage);
+          resolve({ 
+            success: false, 
+            error: `Failed to open terminal: ${errorMessage}` 
+          });
+        }
       });
 
     } catch (error) {
