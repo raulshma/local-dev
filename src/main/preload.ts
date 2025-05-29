@@ -30,8 +30,10 @@ export type Channels =
   | 'script:execute'
   | 'script:stop'
   | 'script:output'
+  | 'script:is-running'
   | 'env:load'
   | 'env:save'
+  | 'env:backup'
   | 'action:open-ide'
   | 'action:open-folder'
   | 'action:open-terminal'
@@ -89,6 +91,28 @@ const electronHandler = {
     removeStatusListener: () => {
       ipcRenderer.removeAllListeners('script:status');
     },
+  },
+  // Environment variables
+  env: {
+    load: (projectId: string) => 
+      ipcRenderer.invoke('env:load', projectId) as Promise<{
+        success: boolean;
+        exists?: boolean;
+        variables?: Record<string, string>;
+        originalContent?: string;
+        error?: string;
+      }>,
+    save: (projectId: string, variables: Record<string, string>) => 
+      ipcRenderer.invoke('env:save', projectId, variables) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+    backup: (projectId: string) => 
+      ipcRenderer.invoke('env:backup', projectId) as Promise<{
+        success: boolean;
+        backupPath?: string;
+        error?: string;
+      }>,
   },
   // Dialog utilities
   dialog: {

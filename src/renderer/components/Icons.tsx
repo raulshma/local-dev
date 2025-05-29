@@ -111,3 +111,28 @@ export const DebugIcon: React.FC<IconProps> = ({ size = 16, color = 'currentColo
     <path d="M9.83 4.5l1.5-1.5.7.7L10.54 5.2C11.6 5.9 12.3 7.1 12.3 8.5c0 .6-.1 1.2-.3 1.7l1.5 1.5-.7.7-1.5-1.5c-.7 1.1-1.9 1.8-3.3 1.8s-2.6-.7-3.3-1.8L2.2 12.4l-.7-.7 1.5-1.5c-.2-.5-.3-1.1-.3-1.7 0-1.4.7-2.6 1.7-3.3L2.97 3.7l.7-.7 1.5 1.5C5.7 4.2 6.3 4 7 4c.3 0 .6 0 .9.1L9.83 4.5zM8 5c-1.9 0-3.5 1.6-3.5 3.5S6.1 12 8 12s3.5-1.6 3.5-3.5S9.9 5 8 5z"/>
   </svg>
 );
+
+export const TrashIcon: React.FC<IconProps> = ({ size = 16, color = 'currentColor', className }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill={color} className={className}>
+    <path d="M6.5 1h3l.5.5v1h4v1h-1v9.5l-.5.5h-9l-.5-.5V3.5h-1v-1h4v-1l.5-.5zM5 13h6V4H5v9zm1-8v7h1V5H6zm2 0v7h1V5H8zm2 0v7h1V5h-1zM6.5 2v.5h3V2h-3z"/>
+  </svg>
+);
+
+export const SaveIcon: React.FC<IconProps> = ({ size = 16, color = 'currentColor', className }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill={color} className={className}>
+    <path d="M13.5 1h-1l-.5.5v3l-.5.5H10V4.5l-.5-.5h-3l-.5.5V6H4.5l-.5.5v8l.5.5h9l.5-.5v-8L13.5 6V1.5l-.5-.5zM12 6v8H4V7h8V6zM6 5h4V2H6v3zm1-2h2v1H7V3z"/>
+  </svg>
+);
+
+export const BackupIcon: React.FC<IconProps> = ({ size = 16, color = 'currentColor', className }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill={color} className={className}>
+    <path d="M14.5 7h-1l-.5.5v6l-.5.5h-9l-.5-.5v-6L3 7H2l-.5.5v7l.5.5h11l.5-.5v-7L14.5 7z"/>
+    <path d="M8.5 1h-1l-.5.5v8.793L5.854 9.146l-.708.708L8 12.707l2.854-2.853-.708-.708L8.5 10.293V1.5L8.5 1z"/>
+  </svg>
+);
+
+export const RefreshIcon: React.FC<IconProps> = ({ size = 16, color = 'currentColor', className }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill={color} className={className}>
+    <path d="M13.451 5.609l-.579-.939-1.068.812-.076.094c-.335.415-.927 1.341-1.124 2.876l-.021.165.033.163.071.345c0 1.654-1.346 3-3 3s-3-1.346-3-3 1.346-3 3-3c.789 0 1.506.302 2.049.795l-1.049.804.030.022 3.22-.004v-3.21l-.486.497zm-7.864 4.781l.579.939 1.068-.812.076-.094c.335-.415.927-1.341 1.124-2.876l.021-.165-.033-.163-.071-.345c0-1.654 1.346-3 3-3s3 1.346 3 3-1.346 3-3 3c-.789 0-1.506-.302-2.049-.795l1.049-.804-.030-.022-3.22.004v3.21l.486-.497z"/>
+  </svg>
+);

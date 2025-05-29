@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Project, ProjectScript, ScriptOutput, ScriptStatus } from '../../types';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { Project, ProjectScript, ScriptOutput, ScriptStatus, EnvironmentConfig } from '../../types';
 
 interface AppContextType {
   projects: Project[];
@@ -8,6 +8,8 @@ interface AppContextType {
   error: string | null;
   runningScripts: Set<string>;
   scriptOutput: { [scriptId: string]: { output: string; isVisible: boolean } };
+  environmentConfig: EnvironmentConfig | null;
+  environmentLoading: boolean;
   
   // Actions
   loadProjects: () => Promise<void>;
@@ -23,6 +25,11 @@ interface AppContextType {
   stopScript: (projectId: string, scriptId: string) => Promise<void>;
   clearScriptOutput: (scriptId: string) => void;
   toggleScriptOutput: (scriptId: string) => void;
+  
+  // Environment actions
+  loadEnvironment: (projectId: string) => Promise<void>;
+  saveEnvironment: (projectId: string, variables: Record<string, string>) => Promise<void>;
+  backupEnvironment: (projectId: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -46,6 +53,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [error, setError] = useState<string | null>(null);
   const [runningScripts, setRunningScripts] = useState<Set<string>>(new Set());
   const [scriptOutput, setScriptOutput] = useState<{ [scriptId: string]: { output: string; isVisible: boolean } }>({});
+  const [environmentConfig, setEnvironmentConfig] = useState<EnvironmentConfig | null>(null);
+  const [environmentLoading, setEnvironmentLoading] = useState(false);
 
   const loadProjects = async () => {
     setIsLoading(true);
@@ -81,10 +90,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     
     try {
       await window.electron.project.remove(id);
-      await loadProjects(); // Reload projects list
-      // Clear selection if we removed the selected project
+      await loadProjects(); // Reload projects list      // Clear selection if we removed the selected project
       if (selectedProject?.id === id) {
         setSelectedProject(null);
+        setEnvironmentConfig(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -92,7 +101,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       setIsLoading(false);
     }
   };
-
   const selectProject = async (id: string) => {
     setError(null);
     
@@ -101,6 +109,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       const project = projects.find(p => p.id === id);
       if (project) {
         setSelectedProject(project);
+        // Clear environment config when switching projects
+        setEnvironmentConfig(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -256,8 +266,70 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   // Load projects on component mount
   useEffect(() => {
     loadProjects();
+  }, []);  // Environment methods
+  const loadEnvironment = useCallback(async (projectId: string) => {
+    setEnvironmentLoading(true);
+    setError(null);
+    
+    try {
+      const result = await window.electron.env.load(projectId);
+      if (result.success) {
+        setEnvironmentConfig({
+          variables: result.variables || {},
+          exists: result.exists || false,
+          originalContent: result.originalContent
+        });
+      } else {
+        setError(result.error || 'Failed to load environment variables');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setEnvironmentLoading(false);
+    }
   }, []);
 
+  const saveEnvironment = useCallback(async (projectId: string, variables: Record<string, string>) => {
+    setEnvironmentLoading(true);
+    setError(null);
+    
+    try {
+      const result = await window.electron.env.save(projectId, variables);
+      if (result.success) {
+        // Update local state with saved variables
+        setEnvironmentConfig(prev => prev ? {
+          ...prev,
+          variables
+        } : {
+          variables,
+          exists: true
+        });
+      } else {
+        setError(result.error || 'Failed to save environment variables');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setEnvironmentLoading(false);
+    }
+  }, []);
+
+  const backupEnvironment = useCallback(async (projectId: string) => {
+    setEnvironmentLoading(true);
+    setError(null);
+    
+    try {
+      const result = await window.electron.env.backup(projectId);
+      if (!result.success) {
+        setError(result.error || 'Failed to backup environment variables');
+      }
+      // Note: We could show a success message with the backup path if needed
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setEnvironmentLoading(false);
+    }
+  }, []);
   const value: AppContextType = {
     projects,
     selectedProject,
@@ -265,6 +337,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     error,
     runningScripts,
     scriptOutput,
+    environmentConfig,
+    environmentLoading,
     loadProjects,
     addProject,
     removeProject,
@@ -276,6 +350,9 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     stopScript,
     clearScriptOutput,
     toggleScriptOutput,
+    loadEnvironment,
+    saveEnvironment,
+    backupEnvironment,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { Project } from '../../types';
 import ScriptsTab from './ScriptsTab';
+import { EnvironmentTab } from './EnvironmentTab';
 import { 
   FolderIcon, 
   CodeIcon, 
@@ -278,20 +279,8 @@ const Dashboard: React.FC = () => {
                       onExecuteScript={(scriptId) => executeScript(selectedProject.id, scriptId)}
                       onStopScript={(scriptId) => stopScript(selectedProject.id, scriptId)}
                     />
-                  )}
-
-                  {activeTab === 'environment' && (
-                    <div className="action-section">
-                      <h2 className="section-title">Environment Variables</h2>                      <div className="empty-state">
-                        <div className="empty-state-icon">
-                          <SettingsIcon size={48} color="var(--vscode-secondary-foreground)" />
-                        </div>
-                        <div className="empty-state-title">Environment Configuration</div>
-                        <div className="empty-state-description">
-                          Environment variable editor and management features are coming soon.
-                        </div>
-                      </div>
-                    </div>
+                  )}                  {activeTab === 'environment' && (
+                    <EnvironmentTab projectId={selectedProject.id} />
                   )}
                 </div>
               </div>

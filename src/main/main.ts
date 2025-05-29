@@ -13,6 +13,9 @@ import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import { spawn, ChildProcess } from 'child_process';
+import fs from 'fs/promises';
+import { existsSync } from 'fs';
+import dotenv from 'dotenv';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import StoreService from './services/store';
@@ -258,6 +261,108 @@ const setupIpcHandlers = () => {
   ipcMain.handle('script:is-running', async (event, projectId: string, scriptId: string) => {
     const processKey = `${projectId}:${scriptId}`;
     return runningProcesses.has(processKey);
+  });
+
+  // Environment variable handlers
+  ipcMain.handle('env:load', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const envPath = path.join(project.path, '.env');
+      
+      if (!existsSync(envPath)) {
+        return { success: true, exists: false, variables: {} };
+      }
+
+      const envContent = await fs.readFile(envPath, 'utf-8');
+      const parsed = dotenv.parse(envContent);
+      
+      return { 
+        success: true, 
+        exists: true, 
+        variables: parsed,
+        originalContent: envContent 
+      };
+    } catch (error) {
+      console.error('Error loading .env file:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      };
+    }
+  });
+
+  ipcMain.handle('env:save', async (event, projectId: string, variables: Record<string, string>) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const envPath = path.join(project.path, '.env');
+      
+      // Create backup if file exists
+      if (existsSync(envPath)) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = path.join(project.path, `.env.bak-${timestamp}`);
+        await fs.copyFile(envPath, backupPath);
+      }
+
+      // Construct .env content from variables
+      const envContent = Object.entries(variables)
+        .map(([key, value]) => {
+          // Escape quotes and handle multiline values
+          const escapedValue = value.includes('\n') || value.includes('"') || value.includes("'")
+            ? `"${value.replace(/"/g, '\\"')}"` 
+            : value;
+          return `${key}=${escapedValue}`;
+        })
+        .join('\n');
+
+      // Add trailing newline
+      const finalContent = envContent ? `${envContent}\n` : '';
+      
+      await fs.writeFile(envPath, finalContent, 'utf-8');
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error saving .env file:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      };
+    }
+  });
+
+  ipcMain.handle('env:backup', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const envPath = path.join(project.path, '.env');
+      
+      if (!existsSync(envPath)) {
+        return { success: false, error: '.env file does not exist' };
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupPath = path.join(project.path, `.env.bak-${timestamp}`);
+      
+      await fs.copyFile(envPath, backupPath);
+      
+      return { success: true, backupPath };
+    } catch (error) {
+      console.error('Error creating .env backup:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      };
+    }
   });
 };
 

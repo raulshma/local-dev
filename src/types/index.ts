@@ -28,6 +28,18 @@ export interface ScriptStatus {
   error?: string;
 }
 
+export interface EnvironmentVariable {
+  key: string;
+  value: string;
+  isNew?: boolean;
+}
+
+export interface EnvironmentConfig {
+  variables: Record<string, string>;
+  exists: boolean;
+  originalContent?: string;
+}
+
 export interface AppSettings {
   ideCommand: string;
   terminalCommand?: string;
