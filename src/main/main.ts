@@ -9,7 +9,7 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
-import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, dialog, IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import { spawn, ChildProcess, exec, execSync } from 'child_process';
@@ -20,6 +20,7 @@ import os from 'os';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import StoreService from './services/store';
+import { ProjectDetectionService } from './services/projectDetection';
 
 class AppUpdater {
   constructor() {
@@ -31,6 +32,7 @@ class AppUpdater {
 
 let mainWindow: BrowserWindow | null = null;
 let storeService: StoreService;
+let projectDetectionService: ProjectDetectionService;
 
 // Track running processes
 const runningProcesses = new Map<string, ChildProcess>();
@@ -38,6 +40,7 @@ const runningProcesses = new Map<string, ChildProcess>();
 // Initialize store service
 const initializeStore = () => {
   storeService = new StoreService();
+  projectDetectionService = new ProjectDetectionService();
 };
 
 // IPC Handlers for project management
@@ -63,6 +66,20 @@ const setupIpcHandlers = () => {
   ipcMain.handle('project:add', async (event, name: string, projectPath: string) => {
     try {
       const project = storeService.addProject(name, projectPath);
+      
+      // Auto-detect and add scripts
+      try {
+        const detectedTypes = await projectDetectionService.detectProjectType(projectPath);
+        const detectedScripts = await projectDetectionService.generateScripts(projectPath, detectedTypes);
+        
+        if (detectedScripts.length > 0) {
+          storeService.addAutoDetectedScripts(project.id, detectedScripts);
+        }
+      } catch (detectionError) {
+        console.warn('Error during script auto-detection:', detectionError);
+        // Continue without auto-detection if it fails
+      }
+      
       return project;
     } catch (error) {
       console.error('Error adding project:', error);
@@ -104,6 +121,158 @@ const setupIpcHandlers = () => {
     } catch (error) {
       console.error('Error selecting project:', error);
       throw new Error(error instanceof Error ? error.message : 'Unknown error');
+    }
+  });
+
+  // Project detection handlers
+  ipcMain.handle('project:detect-type', async (event, projectPath: string) => {
+    try {
+      const detectedTypes = await projectDetectionService.detectProjectType(projectPath);
+      return { success: true, types: detectedTypes };
+    } catch (error) {
+      console.error('Error detecting project type:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('project:detect-scripts', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const detectedTypes = await projectDetectionService.detectProjectType(project.path);
+      const detectedScripts = await projectDetectionService.generateScripts(project.path, detectedTypes);
+      
+      return { success: true, scripts: detectedScripts, types: detectedTypes };
+    } catch (error) {
+      console.error('Error detecting scripts:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('project:refresh-auto-scripts', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const detectedTypes = await projectDetectionService.detectProjectType(project.path);
+      const detectedScripts = await projectDetectionService.generateScripts(project.path, detectedTypes);
+      
+      const success = storeService.addAutoDetectedScripts(projectId, detectedScripts);
+      
+      return { success, scripts: detectedScripts, types: detectedTypes };
+    } catch (error) {
+      console.error('Error refreshing auto-detected scripts:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('project:start-dev', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const devCommand = await projectDetectionService.findBestDevCommand(project.path);
+      if (!devCommand) {
+        return { success: false, error: 'No development command found for this project type' };
+      }
+
+      // Execute the dev command using the same logic as script execution
+      const processKey = `${projectId}:auto-dev`;
+      
+      // Stop existing process if running
+      if (runningProcesses.has(processKey)) {
+        const existingProcess = runningProcesses.get(processKey);
+        existingProcess?.kill('SIGTERM');
+        runningProcesses.delete(processKey);
+      }
+
+      // Parse command and arguments
+      const commandParts = devCommand.command.split(' ');
+      const command = commandParts[0];
+      const args = commandParts.slice(1);
+
+      // Start new process
+      const childProcess = spawn(command, args, {
+        cwd: project.path,
+        shell: true,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      // Store process reference
+      runningProcesses.set(processKey, childProcess);
+
+      // Set up output streaming
+      childProcess.stdout?.on('data', (data) => {
+        if (mainWindow) {
+          mainWindow.webContents.send('script:output', {
+            projectId,
+            scriptId: 'auto-dev',
+            type: 'stdout',
+            data: data.toString()
+          });
+        }
+      });
+
+      childProcess.stderr?.on('data', (data) => {
+        if (mainWindow) {
+          mainWindow.webContents.send('script:output', {
+            projectId,
+            scriptId: 'auto-dev',
+            type: 'stderr',
+            data: data.toString()
+          });
+        }
+      });
+
+      childProcess.on('close', (code) => {
+        runningProcesses.delete(processKey);
+        if (mainWindow) {
+          mainWindow.webContents.send('script:status', {
+            projectId,
+            scriptId: 'auto-dev',
+            status: 'stopped',
+            exitCode: code
+          });
+        }
+      });
+
+      childProcess.on('error', (error) => {
+        runningProcesses.delete(processKey);
+        if (mainWindow) {
+          mainWindow.webContents.send('script:status', {
+            projectId,
+            scriptId: 'auto-dev',
+            status: 'error',
+            error: error.message
+          });
+        }
+      });
+
+      // Send started status
+      if (mainWindow) {
+        mainWindow.webContents.send('script:status', {
+          projectId,
+          scriptId: 'auto-dev',
+          status: 'running'
+        });
+      }
+
+      return { 
+        success: true, 
+        command: devCommand.command, 
+        projectType: devCommand.projectType,
+        pid: childProcess.pid 
+      };
+    } catch (error) {
+      console.error('Error starting dev server:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
 

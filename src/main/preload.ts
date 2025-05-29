@@ -16,6 +16,8 @@ interface ProjectScript {
   id: string;
   name: string;
   command: string;
+  isAutoDetected?: boolean;
+  projectType?: string;
 }
 
 export type Channels = 
@@ -29,6 +31,10 @@ export type Channels =
   | 'project:update-script'
   | 'project:get-settings'
   | 'project:update-settings'
+  | 'project:detect-type'
+  | 'project:detect-scripts'
+  | 'project:refresh-auto-scripts'
+  | 'project:start-dev'
   | 'script:execute'
   | 'script:stop'
   | 'script:output'
@@ -84,6 +90,35 @@ const electronHandler = {
     updateSettings: (projectId: string, settings: Partial<{ ideCommand: string; terminalCommand: string }>) => 
       ipcRenderer.invoke('project:update-settings', projectId, settings) as Promise<{
         success: boolean;
+        error?: string;
+      }>,
+    // Project detection
+    detectType: (projectPath: string) => 
+      ipcRenderer.invoke('project:detect-type', projectPath) as Promise<{
+        success: boolean;
+        types?: Array<{ type: string; confidence: number; indicators: string[] }>;
+        error?: string;
+      }>,
+    detectScripts: (projectId: string) => 
+      ipcRenderer.invoke('project:detect-scripts', projectId) as Promise<{
+        success: boolean;
+        scripts?: Array<{ name: string; command: string; projectType: string; priority: number }>;
+        types?: Array<{ type: string; confidence: number; indicators: string[] }>;
+        error?: string;
+      }>,
+    refreshAutoScripts: (projectId: string) => 
+      ipcRenderer.invoke('project:refresh-auto-scripts', projectId) as Promise<{
+        success: boolean;
+        scripts?: Array<{ name: string; command: string; projectType: string; priority: number }>;
+        types?: Array<{ type: string; confidence: number; indicators: string[] }>;
+        error?: string;
+      }>,
+    startDev: (projectId: string) => 
+      ipcRenderer.invoke('project:start-dev', projectId) as Promise<{
+        success: boolean;
+        command?: string;
+        projectType?: string;
+        pid?: number;
         error?: string;
       }>,
   },

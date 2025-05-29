@@ -17,6 +17,8 @@ export interface ProjectScript {
   id: string;
   name: string;
   command: string;
+  isAutoDetected?: boolean;
+  projectType?: string;
 }
 
 export interface ScriptOutput {
@@ -43,4 +45,17 @@ export interface AppStore {
   projects: Project[];
   settings: AppSettings;
   selectedProjectId: string | null;
+}
+
+export interface ProjectType {
+  type: string;
+  confidence: number;
+  indicators: string[];
+}
+
+export interface DetectedScript {
+  name: string;
+  command: string;
+  projectType: string;
+  priority: number;
 }

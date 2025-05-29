@@ -37,6 +37,10 @@ interface AppContextType {
   // Project settings
   loadProjectSettings: (projectId: string) => Promise<{ projectSettings: any; effectiveSettings: any } | null>;
   saveProjectSettings: (projectId: string, settings: Partial<{ ideCommand: string; terminalCommand: string }>) => Promise<void>;
+  
+  // Project detection and auto features
+  refreshAutoScripts: (projectId: string) => Promise<void>;
+  startDevServer: (projectId: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -396,7 +400,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       return null;
     }
   }, []);
-
   const saveProjectSettings = useCallback(async (projectId: string, settings: Partial<{ ideCommand: string; terminalCommand: string }>) => {
     setError(null);
     
@@ -410,6 +413,43 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     }
   }, []);
 
+  // Project detection and auto features
+  const refreshAutoScripts = useCallback(async (projectId: string) => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const result = await window.electron.project.refreshAutoScripts(projectId);
+      if (result.success) {
+        await loadProjects(); // Reload to get updated scripts
+      } else {
+        setError(result.error || 'Failed to refresh auto-detected scripts');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [loadProjects]);
+
+  const startDevServer = useCallback(async (projectId: string) => {
+    setError(null);
+    
+    try {
+      const result = await window.electron.project.startDev(projectId);
+      if (result.success) {
+        // Add to running scripts for UI feedback
+        setRunningScripts(prev => new Set(prev).add(`${projectId}:auto-dev`));
+        
+        // Show success message with detected command
+        console.log(`Started dev server: ${result.command} (${result.projectType})`);
+      } else {
+        setError(result.error || 'Failed to start development server');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    }
+  }, []);
   const value: AppContextType = {
     projects,
     selectedProject,
@@ -438,6 +478,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     openInTerminal,
     loadProjectSettings,
     saveProjectSettings,
+    refreshAutoScripts,
+    startDevServer,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

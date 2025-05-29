@@ -31,8 +31,10 @@ const Dashboard: React.FC = () => {  const {
     stopScript,
     openInIDE,
     openFolder,
-    openInTerminal
-  } = useApp();  const [showAddModal, setShowAddModal] = useState(false);
+    openInTerminal,
+    startDevServer,
+    refreshAutoScripts
+  } = useApp();const [showAddModal, setShowAddModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [ideCommand, setIdeCommand] = useState('code');
@@ -309,16 +311,19 @@ const Dashboard: React.FC = () => {  const {
                             <div className="action-card-title">Open Terminal</div>
                             <div className="action-card-description">Launch terminal in project directory</div>
                           </div>
-                        </button>
-                        <div className="action-card">
+                        </button>                        <button 
+                          className="action-card"
+                          onClick={() => startDevServer(selectedProject.id)}
+                          title="Start development server"
+                        >
                           <div className="action-card-icon">
                             <PlayIcon size={20} />
                           </div>
                           <div className="action-card-content">
                             <div className="action-card-title">Start Dev Server</div>
-                            <div className="action-card-description">Run the development server</div>
+                            <div className="action-card-description">Auto-detect and run the development server</div>
                           </div>
-                        </div>
+                        </button>
                       </div>
                     </div>
                   )}{activeTab === 'scripts' && (

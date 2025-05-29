@@ -29,7 +29,7 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
   onExecuteScript,
   onStopScript,
 }) => {
-  const { runningScripts, scriptOutput, clearScriptOutput, toggleScriptOutput } = useApp();
+  const { runningScripts, scriptOutput, clearScriptOutput, toggleScriptOutput, refreshAutoScripts } = useApp();
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingScript, setEditingScript] = useState<ProjectScript | null>(null);
   const [scriptName, setScriptName] = useState('');
@@ -88,122 +88,238 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
       onExecuteScript(script.id);
     }
   };
-
   return (
     <div className="action-section">
       <div className="section-header-with-actions">
         <h2 className="section-title">Scripts</h2>
-        <button 
-          className="btn btn-primary btn-sm"
-          onClick={() => setShowAddModal(true)}
-        >
-          <PlusIcon size={14} />
-          Add Script
-        </button>
-      </div>
-
-      {project.scripts.length === 0 ? (
+        <div className="script-actions">
+          <button 
+            className="btn btn-secondary btn-sm"
+            onClick={() => refreshAutoScripts(project.id)}
+            title="Refresh auto-detected scripts"
+          >
+            🔄 Refresh Auto-Scripts
+          </button>
+          <button 
+            className="btn btn-primary btn-sm"
+            onClick={() => setShowAddModal(true)}
+          >
+            <PlusIcon size={14} />
+            Add Script
+          </button>
+        </div>
+      </div>      {project.scripts.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon">
             <SettingsIcon size={48} color="var(--vscode-secondary-foreground)" />
           </div>
           <div className="empty-state-title">No Scripts Defined</div>
           <div className="empty-state-description">
-            Add custom scripts to run common development tasks like starting servers, running tests, or building your project.
+            Add custom scripts to run common development tasks, or let the app auto-detect scripts from your project.
           </div>
-          <button 
-            className="btn btn-primary" 
-            onClick={() => setShowAddModal(true)}
-          >
-            <PlusIcon size={14} />
-            Add Your First Script
-          </button>
+          <div className="empty-state-actions">
+            <button 
+              className="btn btn-secondary" 
+              onClick={() => refreshAutoScripts(project.id)}
+            >
+              🔄 Detect Scripts
+            </button>
+            <button 
+              className="btn btn-primary" 
+              onClick={() => setShowAddModal(true)}
+            >
+              <PlusIcon size={14} />
+              Add Manual Script
+            </button>
+          </div>
         </div>
       ) : (
-        <div className="scripts-list">
-          {project.scripts.map((script) => {
-            const isRunning = isScriptRunning(script.id);
-            const output = scriptOutput[script.id];
-            
-            return (
-              <div key={script.id} className="script-item">
-                <div className="script-header">
-                  <div className="script-info">
-                    <div className="script-name">{script.name}</div>
-                    <div className="script-command">{script.command}</div>
-                  </div>
-                  <div className="script-actions">
-                    <button
-                      className={`btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm`}
-                      onClick={() => handleScriptAction(script)}
-                      title={isRunning ? 'Stop script' : 'Run script'}
-                    >
-                      {isRunning ? (
-                        <>
-                          <CloseIcon size={14} />
-                          Stop
-                        </>
-                      ) : (
-                        <>
-                          <PlayIcon size={14} />
-                          Run
-                        </>
-                      )}
-                    </button>
-                    {output && (
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => toggleScriptOutput(script.id)}
-                        title={output.isVisible ? 'Hide output' : 'Show output'}
-                      >
-                        <TerminalIcon size={14} />
-                        {output.isVisible ? (
-                          <ChevronUpIcon size={14} />
-                        ) : (
-                          <ChevronDownIcon size={14} />
+        <div className="scripts-container">
+          {/* Auto-detected scripts */}
+          {project.scripts.filter(script => script.isAutoDetected).length > 0 && (
+            <div className="scripts-section">
+              <h3 className="scripts-section-title">
+                🤖 Auto-detected Scripts
+                <span className="scripts-count">
+                  ({project.scripts.filter(script => script.isAutoDetected).length})
+                </span>
+              </h3>
+              <div className="scripts-list">
+                {project.scripts
+                  .filter(script => script.isAutoDetected)
+                  .map((script) => {
+                    const isRunning = isScriptRunning(script.id);
+                    const output = scriptOutput[script.id];
+                    
+                    return (
+                      <div key={script.id} className="script-item auto-detected">
+                        <div className="script-header">
+                          <div className="script-info">
+                            <div className="script-name">
+                              <span className="auto-detected-badge">AUTO</span>
+                              {script.name}
+                              {script.projectType && (
+                                <span className="project-type-badge">{script.projectType}</span>
+                              )}
+                            </div>
+                            <div className="script-command">{script.command}</div>
+                          </div>
+                          <div className="script-actions">
+                            <button
+                              className={`btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm`}
+                              onClick={() => handleScriptAction(script)}
+                              title={isRunning ? 'Stop script' : 'Run script'}
+                            >
+                              {isRunning ? (
+                                <>
+                                  <CloseIcon size={14} />
+                                  Stop
+                                </>
+                              ) : (
+                                <>
+                                  <PlayIcon size={14} />
+                                  Run
+                                </>
+                              )}
+                            </button>
+                            {output && (
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => toggleScriptOutput(script.id)}
+                                title={output.isVisible ? 'Hide output' : 'Show output'}
+                              >
+                                <TerminalIcon size={14} />
+                                {output.isVisible ? (
+                                  <ChevronUpIcon size={14} />
+                                ) : (
+                                  <ChevronDownIcon size={14} />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {output?.isVisible && (
+                          <div className="script-output">
+                            <div className="script-output-header">
+                              <span>Output</span>
+                              <button
+                                className="btn btn-secondary btn-xs"
+                                onClick={() => clearScriptOutput(script.id)}
+                                title="Clear output"
+                              >
+                                Clear
+                              </button>
+                            </div>
+                            <div className="script-output-content">
+                              <pre>{output.output || 'No output yet...'}</pre>
+                            </div>
+                          </div>
                         )}
-                      </button>
-                    )}
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => handleEditScript(script)}
-                      title="Edit script"
-                    >
-                      <EditIcon size={14} />
-                    </button>
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={() => {
-                        if (window.confirm(`Are you sure you want to delete the script "${script.name}"?`)) {
-                          onRemoveScript(script.id);
-                        }
-                      }}
-                      title="Delete script"
-                    >
-                      <CloseIcon size={14} />
-                    </button>
-                  </div>
-                </div>
-                {output?.isVisible && (
-                  <div className="script-output">
-                    <div className="script-output-header">
-                      <span>Output</span>
-                      <button
-                        className="btn btn-secondary btn-xs"
-                        onClick={() => clearScriptOutput(script.id)}
-                        title="Clear output"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                    <div className="script-output-content">
-                      <pre>{output.output || 'No output yet...'}</pre>
-                    </div>
-                  </div>
-                )}
+                      </div>
+                    );
+                  })}
               </div>
-            );
-          })}
+            </div>
+          )}
+
+          {/* Manual scripts */}
+          {project.scripts.filter(script => !script.isAutoDetected).length > 0 && (
+            <div className="scripts-section">
+              <h3 className="scripts-section-title">
+                ⚙️ Custom Scripts
+                <span className="scripts-count">
+                  ({project.scripts.filter(script => !script.isAutoDetected).length})
+                </span>
+              </h3>
+              <div className="scripts-list">
+                {project.scripts
+                  .filter(script => !script.isAutoDetected)
+                  .map((script) => {
+                    const isRunning = isScriptRunning(script.id);
+                    const output = scriptOutput[script.id];
+                    
+                    return (
+                      <div key={script.id} className="script-item">
+                        <div className="script-header">
+                          <div className="script-info">
+                            <div className="script-name">{script.name}</div>
+                            <div className="script-command">{script.command}</div>
+                          </div>
+                          <div className="script-actions">
+                            <button
+                              className={`btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm`}
+                              onClick={() => handleScriptAction(script)}
+                              title={isRunning ? 'Stop script' : 'Run script'}
+                            >
+                              {isRunning ? (
+                                <>
+                                  <CloseIcon size={14} />
+                                  Stop
+                                </>
+                              ) : (
+                                <>
+                                  <PlayIcon size={14} />
+                                  Run
+                                </>
+                              )}
+                            </button>
+                            {output && (
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => toggleScriptOutput(script.id)}
+                                title={output.isVisible ? 'Hide output' : 'Show output'}
+                              >
+                                <TerminalIcon size={14} />
+                                {output.isVisible ? (
+                                  <ChevronUpIcon size={14} />
+                                ) : (
+                                  <ChevronDownIcon size={14} />
+                                )}
+                              </button>
+                            )}
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleEditScript(script)}
+                              title="Edit script"
+                            >
+                              <EditIcon size={14} />
+                            </button>
+                            <button
+                              className="btn btn-danger btn-sm"
+                              onClick={() => {
+                                if (window.confirm(`Are you sure you want to delete the script "${script.name}"?`)) {
+                                  onRemoveScript(script.id);
+                                }
+                              }}
+                              title="Delete script"
+                            >
+                              <CloseIcon size={14} />
+                            </button>
+                          </div>
+                        </div>
+                        {output?.isVisible && (
+                          <div className="script-output">
+                            <div className="script-output-header">
+                              <span>Output</span>
+                              <button
+                                className="btn btn-secondary btn-xs"
+                                onClick={() => clearScriptOutput(script.id)}
+                                title="Clear output"
+                              >
+                                Clear
+                              </button>
+                            </div>
+                            <div className="script-output-content">
+                              <pre>{output.output || 'No output yet...'}</pre>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

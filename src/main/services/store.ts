@@ -1,6 +1,6 @@
 import Store from 'electron-store';
 import { v4 as uuidv4 } from 'uuid';
-import { Project, ProjectScript, AppStore, AppSettings, ProjectSettings } from '../types';
+import { Project, ProjectScript, AppStore, AppSettings, ProjectSettings, DetectedScript } from '../types';
 
 class StoreService {
   private store: Store<AppStore>;
@@ -86,7 +86,6 @@ class StoreService {
       }
     }
   }
-
   // Script management
   addScript(projectId: string, script: Omit<ProjectScript, 'id'>): ProjectScript | null {
     const project = this.getProject(projectId);
@@ -100,6 +99,28 @@ class StoreService {
     project.scripts.push(newScript);
     this.updateProject(project);
     return newScript;
+  }
+
+  // Add auto-detected scripts to a project
+  addAutoDetectedScripts(projectId: string, detectedScripts: DetectedScript[]): boolean {
+    const project = this.getProject(projectId);
+    if (!project) return false;
+
+    // Remove existing auto-detected scripts to avoid duplicates
+    project.scripts = project.scripts.filter(script => !script.isAutoDetected);
+
+    // Add new auto-detected scripts
+    const autoScripts: ProjectScript[] = detectedScripts.map(script => ({
+      id: uuidv4(),
+      name: script.name,
+      command: script.command,
+      isAutoDetected: true,
+      projectType: script.projectType
+    }));
+
+    project.scripts.push(...autoScripts);
+    this.updateProject(project);
+    return true;
   }
   getScript(projectId: string, scriptId: string): ProjectScript | null {
     const project = this.getProject(projectId);
