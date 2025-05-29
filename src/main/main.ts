@@ -180,70 +180,148 @@ const setupIpcHandlers = () => {
 
       const devCommand = await projectDetectionService.findBestDevCommand(project.path);
       if (!devCommand) {
-        return { success: false, error: 'No development command found for this project type' };
+        return { 
+          success: false, 
+          error: 'No development command found for this project type',
+          projectId
+        };
       }
 
-      // Execute the dev command using the same logic as script execution
+      const effectiveSettings = storeService.getEffectiveSettings(projectId);
+      const projectPath = project.path;
       const processKey = `${projectId}:auto-dev`;
+
+      console.log(`Attempting to start dev server for project: ${project.name}`);
+      console.log(`Dev command: ${devCommand.command}`);
+      console.log(`Project type: ${devCommand.projectType}`);
+      console.log(`Working directory: ${projectPath}`);
       
       // Stop existing process if running
       if (runningProcesses.has(processKey)) {
         const existingProcess = runningProcesses.get(processKey);
+        console.log(`Stopping existing dev server process for project: ${projectId}`);
         existingProcess?.kill('SIGTERM');
         runningProcesses.delete(processKey);
       }
 
-      // Parse command and arguments
-      const commandParts = devCommand.command.split(' ');
+      // Parse command and arguments more intelligently
+      const commandParts = devCommand.command.trim().split(/\s+/);
       const command = commandParts[0];
       const args = commandParts.slice(1);
 
-      // Start new process
-      const childProcess = spawn(command, args, {
-        cwd: project.path,
-        shell: true,
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
+      console.log(`Parsed dev command: ${command}, args: ${JSON.stringify(args)}`);
+
+      // Platform-specific dev server execution handling
+      let childProcess: ChildProcess;
+      
+      if (process.platform === 'win32') {
+        // On Windows, use more reliable approach with clean environment
+        console.log('Starting dev server on Windows platform');
+        
+        try {
+          childProcess = spawn(command, args, {
+            cwd: projectPath,
+            shell: true,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            detached: false, // Keep attached for better process management
+            windowsHide: false, // Don't hide windows for dev servers that might need UI
+            env: {
+              // Pass essential environment variables but avoid Node.js environment bleeding
+              PATH: process.env.PATH,
+              USERPROFILE: process.env.USERPROFILE,
+              APPDATA: process.env.APPDATA,
+              LOCALAPPDATA: process.env.LOCALAPPDATA,
+              PROGRAMFILES: process.env.PROGRAMFILES,
+              'PROGRAMFILES(X86)': process.env['PROGRAMFILES(X86)'],
+              SYSTEMROOT: process.env.SYSTEMROOT,
+              TEMP: process.env.TEMP,
+              TMP: process.env.TMP,
+              USERNAME: process.env.USERNAME,
+              COMPUTERNAME: process.env.COMPUTERNAME,
+            }
+          });
+
+          if (!childProcess.pid) {
+            throw new Error('Failed to start dev server process: No PID obtained');
+          }
+
+          console.log(`Successfully started dev server process with PID: ${childProcess.pid}`);
+        } catch (windowsSpawnError) {
+          console.error('Error spawning dev server on Windows:', windowsSpawnError);
+          throw new Error(`Failed to start dev server on Windows: ${windowsSpawnError instanceof Error ? windowsSpawnError.message : 'Unknown error'}`);
+        }
+      } else {
+        // For non-Windows platforms
+        console.log('Starting dev server on non-Windows platform');
+        
+        try {
+          childProcess = spawn(command, args, {
+            cwd: projectPath,
+            shell: true,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            detached: false,
+            env: {
+              ...process.env, // On non-Windows, keep more of the environment
+            }
+          });
+
+          if (!childProcess.pid) {
+            throw new Error('Failed to start dev server process: No PID obtained');
+          }
+
+          console.log(`Successfully started dev server process with PID: ${childProcess.pid}`);
+        } catch (nonWindowsSpawnError) {
+          console.error('Error spawning dev server on non-Windows:', nonWindowsSpawnError);
+          throw new Error(`Failed to start dev server: ${nonWindowsSpawnError instanceof Error ? nonWindowsSpawnError.message : 'Unknown error'}`);
+        }
+      }
 
       // Store process reference
       runningProcesses.set(processKey, childProcess);
 
-      // Set up output streaming
+      // Set up enhanced output streaming with better logging
       childProcess.stdout?.on('data', (data) => {
+        const output = data.toString();
+        console.log(`Dev server stdout:`, output.trim());
         if (mainWindow) {
           mainWindow.webContents.send('script:output', {
             projectId,
             scriptId: 'auto-dev',
             type: 'stdout',
-            data: data.toString()
+            data: output
           });
         }
       });
 
       childProcess.stderr?.on('data', (data) => {
+        const output = data.toString();
+        console.log(`Dev server stderr:`, output.trim());
         if (mainWindow) {
           mainWindow.webContents.send('script:output', {
             projectId,
             scriptId: 'auto-dev',
             type: 'stderr',
-            data: data.toString()
+            data: output
           });
         }
       });
 
-      childProcess.on('close', (code) => {
+      childProcess.on('close', (code, signal) => {
+        console.log(`Dev server closed with code: ${code}, signal: ${signal}`);
         runningProcesses.delete(processKey);
         if (mainWindow) {
           mainWindow.webContents.send('script:status', {
             projectId,
             scriptId: 'auto-dev',
             status: 'stopped',
-            exitCode: code
+            exitCode: code,
+            signal: signal
           });
         }
       });
 
       childProcess.on('error', (error) => {
+        console.error(`Dev server error:`, error);
         runningProcesses.delete(processKey);
         if (mainWindow) {
           mainWindow.webContents.send('script:status', {
@@ -255,12 +333,23 @@ const setupIpcHandlers = () => {
         }
       });
 
-      // Send started status
+      // Handle process exit event for additional cleanup
+      childProcess.on('exit', (code, signal) => {
+        console.log(`Dev server exited with code: ${code}, signal: ${signal}`);
+        if (runningProcesses.has(processKey)) {
+          runningProcesses.delete(processKey);
+        }
+      });
+
+      // Send started status with enhanced information
       if (mainWindow) {
         mainWindow.webContents.send('script:status', {
           projectId,
           scriptId: 'auto-dev',
-          status: 'running'
+          status: 'running',
+          pid: childProcess.pid,
+          command: devCommand.command,
+          startTime: new Date().toISOString()
         });
       }
 
@@ -268,11 +357,16 @@ const setupIpcHandlers = () => {
         success: true, 
         command: devCommand.command, 
         projectType: devCommand.projectType,
-        pid: childProcess.pid 
+        pid: childProcess.pid,
+        message: `Development server started successfully for project: ${project.name}`
       };
     } catch (error) {
       console.error('Error starting dev server:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        projectId
+      };
     }
   });
 
@@ -317,65 +411,140 @@ const setupIpcHandlers = () => {
         throw new Error('Project or script not found');
       }
 
-      // Stop existing process if running
+      const effectiveSettings = storeService.getEffectiveSettings(projectId);
+      const projectPath = project.path;
       const processKey = `${projectId}:${scriptId}`;
+
+      console.log(`Attempting to execute script "${script.name}" (${scriptId}) for project: ${project.name}`);
+      console.log(`Script command: ${script.command}`);
+      console.log(`Working directory: ${projectPath}`);
+
+      // Stop existing process if running
       if (runningProcesses.has(processKey)) {
         const existingProcess = runningProcesses.get(processKey);
+        console.log(`Stopping existing process for script: ${scriptId}`);
         existingProcess?.kill('SIGTERM');
         runningProcesses.delete(processKey);
       }
 
-      // Parse command and arguments
-      const commandParts = script.command.split(' ');
+      // Parse command and arguments more intelligently
+      const commandParts = script.command.trim().split(/\s+/);
       const command = commandParts[0];
       const args = commandParts.slice(1);
 
-      // Start new process
-      const childProcess = spawn(command, args, {
-        cwd: project.path,
-        shell: true,
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
+      console.log(`Parsed command: ${command}, args: ${JSON.stringify(args)}`);
+
+      // Platform-specific script execution handling
+      let childProcess: ChildProcess;
+      
+      if (process.platform === 'win32') {
+        // On Windows, use more reliable approach with clean environment
+        console.log('Executing script on Windows platform');
+        
+        try {
+          childProcess = spawn(command, args, {
+            cwd: projectPath,
+            shell: true,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            detached: false, // Keep attached for better process management
+            windowsHide: false, // Don't hide windows for scripts that might need UI
+            env: {
+              // Pass essential environment variables but avoid Node.js environment bleeding
+              PATH: process.env.PATH,
+              USERPROFILE: process.env.USERPROFILE,
+              APPDATA: process.env.APPDATA,
+              LOCALAPPDATA: process.env.LOCALAPPDATA,
+              PROGRAMFILES: process.env.PROGRAMFILES,
+              'PROGRAMFILES(X86)': process.env['PROGRAMFILES(X86)'],
+              SYSTEMROOT: process.env.SYSTEMROOT,
+              TEMP: process.env.TEMP,
+              TMP: process.env.TMP,
+              USERNAME: process.env.USERNAME,
+              COMPUTERNAME: process.env.COMPUTERNAME,
+            }
+          });
+
+          if (!childProcess.pid) {
+            throw new Error('Failed to start script process: No PID obtained');
+          }
+
+          console.log(`Successfully started script process with PID: ${childProcess.pid}`);
+        } catch (windowsSpawnError) {
+          console.error('Error spawning script on Windows:', windowsSpawnError);
+          throw new Error(`Failed to execute script on Windows: ${windowsSpawnError instanceof Error ? windowsSpawnError.message : 'Unknown error'}`);
+        }
+      } else {
+        // For non-Windows platforms
+        console.log('Executing script on non-Windows platform');
+        
+        try {
+          childProcess = spawn(command, args, {
+            cwd: projectPath,
+            shell: true,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            detached: false,
+            env: {
+              ...process.env, // On non-Windows, keep more of the environment
+            }
+          });
+
+          if (!childProcess.pid) {
+            throw new Error('Failed to start script process: No PID obtained');
+          }
+
+          console.log(`Successfully started script process with PID: ${childProcess.pid}`);
+        } catch (nonWindowsSpawnError) {
+          console.error('Error spawning script on non-Windows:', nonWindowsSpawnError);
+          throw new Error(`Failed to execute script: ${nonWindowsSpawnError instanceof Error ? nonWindowsSpawnError.message : 'Unknown error'}`);
+        }
+      }
 
       // Store process reference
       runningProcesses.set(processKey, childProcess);
 
-      // Set up output streaming
+      // Set up enhanced output streaming with better logging
       childProcess.stdout?.on('data', (data) => {
+        const output = data.toString();
+        console.log(`Script ${scriptId} stdout:`, output.trim());
         if (mainWindow) {
           mainWindow.webContents.send('script:output', {
             projectId,
             scriptId,
             type: 'stdout',
-            data: data.toString()
+            data: output
           });
         }
       });
 
       childProcess.stderr?.on('data', (data) => {
+        const output = data.toString();
+        console.log(`Script ${scriptId} stderr:`, output.trim());
         if (mainWindow) {
           mainWindow.webContents.send('script:output', {
             projectId,
             scriptId,
             type: 'stderr',
-            data: data.toString()
+            data: output
           });
         }
       });
 
-      childProcess.on('close', (code) => {
+      childProcess.on('close', (code, signal) => {
+        console.log(`Script ${scriptId} closed with code: ${code}, signal: ${signal}`);
         runningProcesses.delete(processKey);
         if (mainWindow) {
           mainWindow.webContents.send('script:status', {
             projectId,
             scriptId,
             status: 'stopped',
-            exitCode: code
+            exitCode: code,
+            signal: signal
           });
         }
       });
 
       childProcess.on('error', (error) => {
+        console.error(`Script ${scriptId} error:`, error);
         runningProcesses.delete(processKey);
         if (mainWindow) {
           mainWindow.webContents.send('script:status', {
@@ -387,19 +556,40 @@ const setupIpcHandlers = () => {
         }
       });
 
-      // Send started status
+      // Handle process exit event for additional cleanup
+      childProcess.on('exit', (code, signal) => {
+        console.log(`Script ${scriptId} exited with code: ${code}, signal: ${signal}`);
+        if (runningProcesses.has(processKey)) {
+          runningProcesses.delete(processKey);
+        }
+      });
+
+      // Send started status with enhanced information
       if (mainWindow) {
         mainWindow.webContents.send('script:status', {
           projectId,
           scriptId,
-          status: 'running'
+          status: 'running',
+          pid: childProcess.pid,
+          command: script.command,
+          startTime: new Date().toISOString()
         });
       }
 
-      return { success: true, pid: childProcess.pid };
+      return { 
+        success: true, 
+        pid: childProcess.pid,
+        command: script.command,
+        message: `Script "${script.name}" started successfully`
+      };
     } catch (error) {
       console.error('Error executing script:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        scriptId,
+        projectId
+      };
     }
   });
 
@@ -408,29 +598,90 @@ const setupIpcHandlers = () => {
       const processKey = `${projectId}:${scriptId}`;
       const process = runningProcesses.get(processKey);
       
+      console.log(`Attempting to stop script: ${scriptId} for project: ${projectId}`);
+      
       if (!process) {
-        return { success: false, error: 'Process not found' };
+        console.log(`No running process found for script: ${scriptId}`);
+        return { 
+          success: false, 
+          error: 'Process not found or already stopped',
+          scriptId,
+          projectId
+        };
       }
 
+      console.log(`Terminating process with PID: ${process.pid} for script: ${scriptId}`);
+      
+      // Send SIGTERM first for graceful shutdown
       process.kill('SIGTERM');
       
-      // Force kill after 5 seconds if not terminated
-      setTimeout(() => {
+      // Force kill after 5 seconds if not terminated gracefully
+      const forceKillTimeout = setTimeout(() => {
         if (runningProcesses.has(processKey)) {
+          console.log(`Force killing script process: ${scriptId} (SIGKILL)`);
           process.kill('SIGKILL');
+          runningProcesses.delete(processKey);
+          
+          // Send force stopped status
+          if (mainWindow) {
+            mainWindow.webContents.send('script:status', {
+              projectId,
+              scriptId,
+              status: 'force-stopped',
+              message: 'Process was force killed after graceful shutdown timeout'
+            });
+          }
         }
       }, 5000);
 
-      return { success: true };
+      // Clear timeout if process terminates gracefully
+      process.on('exit', () => {
+        clearTimeout(forceKillTimeout);
+        console.log(`Script process ${scriptId} terminated gracefully`);
+      });
+
+      return { 
+        success: true, 
+        message: `Termination signal sent to script: ${scriptId}`,
+        scriptId,
+        projectId
+      };
     } catch (error) {
       console.error('Error stopping script:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        scriptId,
+        projectId
+      };
     }
   });
 
   ipcMain.handle('script:is-running', async (event, projectId: string, scriptId: string) => {
-    const processKey = `${projectId}:${scriptId}`;
-    return runningProcesses.has(processKey);
+    try {
+      const processKey = `${projectId}:${scriptId}`;
+      const isRunning = runningProcesses.has(processKey);
+      const process = runningProcesses.get(processKey);
+      
+      console.log(`Checking if script ${scriptId} is running: ${isRunning}`);
+      
+      return {
+        success: true,
+        isRunning,
+        pid: process?.pid || null,
+        scriptId,
+        projectId
+      };
+    } catch (error) {
+      console.error('Error checking script status:', error);
+      return {
+        success: false,
+        isRunning: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        scriptId,
+        projectId
+      };
+    }
   });
 
   // Environment variable handlers
