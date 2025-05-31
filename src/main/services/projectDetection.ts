@@ -20,13 +20,13 @@ export class ProjectDetectionService {
         try {
           const packageContent = await fs.readFile(packageJsonPath, 'utf-8');
           const packageJson = JSON.parse(packageContent);
-          
+
           let confidence = 0.9;
           let indicators = ['package.json'];
-          
+
           // Check for framework-specific dependencies
           const dependencies = { ...packageJson.dependencies, ...packageJson.devDependencies };
-          
+
           if (dependencies.react || dependencies['@types/react']) {
             detections.push({
               type: 'react',
@@ -34,7 +34,7 @@ export class ProjectDetectionService {
               indicators: ['package.json', 'React dependencies']
             });
           }
-          
+
           if (dependencies.next) {
             detections.push({
               type: 'nextjs',
@@ -42,7 +42,7 @@ export class ProjectDetectionService {
               indicators: ['package.json', 'Next.js dependencies']
             });
           }
-          
+
           if (dependencies.vue || dependencies['@vue/core']) {
             detections.push({
               type: 'vue',
@@ -50,7 +50,7 @@ export class ProjectDetectionService {
               indicators: ['package.json', 'Vue dependencies']
             });
           }
-          
+
           if (dependencies.vite) {
             detections.push({
               type: 'vite',
@@ -58,7 +58,7 @@ export class ProjectDetectionService {
               indicators: ['package.json', 'Vite dependencies']
             });
           }
-          
+
           // General Node.js project
           detections.push({
             type: 'nodejs',
@@ -90,20 +90,20 @@ export class ProjectDetectionService {
             indicators: [...pythonIndicators, 'manage.py']
           });
         }
-        
+
         // Flask detection
         if (files.some(file => file === 'app.py' || file === 'main.py' || file === 'wsgi.py')) {
           const flaskIndicators = [...pythonIndicators];
           if (fileSet.has('app.py')) flaskIndicators.push('app.py');
           if (fileSet.has('main.py')) flaskIndicators.push('main.py');
-          
+
           detections.push({
             type: 'flask',
             confidence: 0.85,
             indicators: flaskIndicators
           });
         }
-        
+
         // FastAPI detection
         if (files.some(file => file === 'main.py') && pythonIndicators.includes('requirements.txt')) {
           try {
@@ -130,10 +130,10 @@ export class ProjectDetectionService {
       }
 
       // .NET/C# Detection
-      const dotnetFiles = files.filter(file => 
-        file.endsWith('.csproj') || 
-        file.endsWith('.sln') || 
-        file.endsWith('.fsproj') || 
+      const dotnetFiles = files.filter(file =>
+        file.endsWith('.csproj') ||
+        file.endsWith('.sln') ||
+        file.endsWith('.fsproj') ||
         file.endsWith('.vbproj')
       );
 
@@ -159,7 +159,7 @@ export class ProjectDetectionService {
         const indicators = [];
         if (fileSet.has('go.mod')) indicators.push('go.mod');
         if (files.some(file => file.endsWith('.go'))) indicators.push('.go files');
-        
+
         detections.push({
           type: 'go',
           confidence: 0.9,
@@ -173,7 +173,7 @@ export class ProjectDetectionService {
         if (fileSet.has('pom.xml')) indicators.push('pom.xml');
         if (fileSet.has('build.gradle')) indicators.push('build.gradle');
         if (files.some(file => file.endsWith('.java'))) indicators.push('.java files');
-        
+
         detections.push({
           type: 'java',
           confidence: 0.85,
@@ -222,29 +222,29 @@ export class ProjectDetectionService {
       case 'vite':
       case 'nextjs':
         return this.getNodeJsScripts(projectPath, projectType);
-      
+
       case 'python':
         return this.getPythonScripts(projectPath);
-      
+
       case 'django':
         return this.getDjangoScripts(projectPath);
-      
+
       case 'flask':
       case 'fastapi':
         return this.getFlaskFastAPIScripts(projectPath, projectType);
-      
+
       case 'dotnet':
         return this.getDotNetScripts(projectPath);
-      
+
       case 'rust':
         return this.getRustScripts(projectPath);
-      
+
       case 'go':
         return this.getGoScripts(projectPath);
-      
+
       case 'java':
         return this.getJavaScripts(projectPath);
-      
+
       default:
         return [];
     }
@@ -252,13 +252,13 @@ export class ProjectDetectionService {
 
   private async getNodeJsScripts(projectPath: string, projectType: string): Promise<DetectedScript[]> {
     const scripts: DetectedScript[] = [];
-    
+
     try {
       const packageJsonPath = path.join(projectPath, 'package.json');
       if (existsSync(packageJsonPath)) {
         const packageContent = await fs.readFile(packageJsonPath, 'utf-8');
         const packageJson = JSON.parse(packageContent);
-        
+
         // Get scripts from package.json
         if (packageJson.scripts) {
           const scriptPriorities: Record<string, number> = {
@@ -285,7 +285,7 @@ export class ProjectDetectionService {
         // Add common package manager alternatives
         const hasYarn = existsSync(path.join(projectPath, 'yarn.lock'));
         const hasPnpm = existsSync(path.join(projectPath, 'pnpm-lock.yaml'));
-        
+
         if (packageJson.scripts?.dev) {
           if (hasYarn) {
             scripts.push({
@@ -601,11 +601,11 @@ export class ProjectDetectionService {
     if (detectedTypes.length === 0) return null;
 
     const scripts = await this.generateScripts(projectPath, detectedTypes);
-    
+
     // Find the highest priority script that's likely a dev server
-    const devScripts = scripts.filter(script => 
-      script.name.includes('dev') || 
-      script.name.includes('start') || 
+    const devScripts = scripts.filter(script =>
+      script.name.includes('dev') ||
+      script.name.includes('start') ||
       script.name.includes('run') ||
       script.name.includes('server')
     );
@@ -627,5 +627,28 @@ export class ProjectDetectionService {
     }
 
     return null;
+  }
+
+  /**
+   * Check if a project has Docker configuration
+   */
+  async hasDockerConfiguration(projectPath: string): Promise<boolean> {
+    try {
+      const files = await fs.readdir(projectPath);
+
+      return files.some(file =>
+        file === 'Dockerfile' ||
+        file === 'dockerfile' ||
+        file === 'docker-compose.yml' ||
+        file === 'docker-compose.yaml' ||
+        file === 'compose.yml' ||
+        file === 'compose.yaml' ||
+        file.startsWith('docker-compose.') ||
+        file.startsWith('compose.')
+      );
+    } catch (error) {
+      console.error('Error checking Docker configuration:', error);
+      return false;
+    }
   }
 }

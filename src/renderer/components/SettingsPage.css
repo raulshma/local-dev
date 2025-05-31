@@ -339,18 +339,18 @@
   .settings-content {
     flex-direction: column;
   }
-  
+
   .settings-sidebar {
     width: 100%;
     height: auto;
     border-right: none;
     border-bottom: 1px solid var(--vscode-panel-border);
   }
-  
+
   .settings-main {
     padding: 16px;
   }
-  
+
   .setting-input,
   .setting-select,
   .theme-options {

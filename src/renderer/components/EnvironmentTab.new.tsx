@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { EnvironmentVariable, EnvironmentConfiguration } from '../../types';
-import { PlusIcon, TrashIcon, SaveIcon, BackupIcon, RefreshIcon } from './Icons';
+import {
+  PlusIcon,
+  TrashIcon,
+  SaveIcon,
+  BackupIcon,
+  RefreshIcon,
+} from './Icons';
 
 interface EnvironmentTabProps {
   projectId: string;
@@ -13,7 +19,11 @@ interface CreateConfigDialogProps {
   onConfirm: (name: string, filename: string, template?: string) => void;
 }
 
-const CreateConfigDialog: React.FC<CreateConfigDialogProps> = ({ isOpen, onClose, onConfirm }) => {
+const CreateConfigDialog: React.FC<CreateConfigDialogProps> = ({
+  isOpen,
+  onClose,
+  onConfirm,
+}) => {
   const [name, setName] = useState('');
   const [filename, setFilename] = useState('');
   const [template, setTemplate] = useState('');
@@ -23,7 +33,7 @@ const CreateConfigDialog: React.FC<CreateConfigDialogProps> = ({ isOpen, onClose
     { value: 'development', label: 'Development Template' },
     { value: 'staging', label: 'Staging Template' },
     { value: 'production', label: 'Production Template' },
-    { value: 'testing', label: 'Testing Template' }
+    { value: 'testing', label: 'Testing Template' },
   ];
 
   const presetConfigs = [
@@ -31,7 +41,7 @@ const CreateConfigDialog: React.FC<CreateConfigDialogProps> = ({ isOpen, onClose
     { name: 'Staging', filename: '.env.staging' },
     { name: 'Production', filename: '.env.production' },
     { name: 'Testing', filename: '.env.test' },
-    { name: 'Local', filename: '.env.local' }
+    { name: 'Local', filename: '.env.local' },
   ];
 
   const handlePresetSelect = (preset: { name: string; filename: string }) => {
@@ -56,7 +66,7 @@ const CreateConfigDialog: React.FC<CreateConfigDialogProps> = ({ isOpen, onClose
     <div className="modal-overlay">
       <div className="modal-content">
         <h3>Create New Environment Configuration</h3>
-        
+
         <div className="config-presets">
           <label>Quick Presets:</label>
           <div className="preset-buttons">
@@ -114,7 +124,11 @@ const CreateConfigDialog: React.FC<CreateConfigDialogProps> = ({ isOpen, onClose
           </div>
 
           <div className="dialog-actions">
-            <button type="button" className="button-secondary" onClick={onClose}>
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={onClose}
+            >
               Cancel
             </button>
             <button type="submit" className="button-primary">
@@ -127,10 +141,13 @@ const CreateConfigDialog: React.FC<CreateConfigDialogProps> = ({ isOpen, onClose
   );
 };
 
-export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => {
+export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({
+  projectId,
+}) => {
   const [envConfigs, setEnvConfigs] = useState<EnvironmentConfiguration[]>([]);
   const [activeConfigId, setActiveConfigId] = useState<string | undefined>();
-  const [activeConfig, setActiveConfig] = useState<EnvironmentConfiguration | null>(null);
+  const [activeConfig, setActiveConfig] =
+    useState<EnvironmentConfiguration | null>(null);
   const [variables, setVariables] = useState<EnvironmentVariable[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -140,23 +157,27 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
   // Load environment configurations
   const loadEnvironmentConfigs = async () => {
     if (!projectId) return;
-    
+
     setLoading(true);
     setError(null);
-    
+
     try {
       const result = await window.electron.envConfig.load(projectId);
-      
+
       if (result.success && result.metadata) {
         setEnvConfigs(result.metadata.configurations);
         setActiveConfigId(result.metadata.activeConfigId);
-          // Find and set active configuration
+        // Find and set active configuration
         const active = result.metadata.configurations.find(
-          (config: EnvironmentConfiguration) => config.id === result.metadata?.activeConfigId
+          (config: EnvironmentConfiguration) =>
+            config.id === result.metadata?.activeConfigId,
         );
-        
+
         if (active) {
-          setActiveConfig(active);          const vars: EnvironmentVariable[] = Object.entries(active.variables).map(([key, value]) => ({
+          setActiveConfig(active);
+          const vars: EnvironmentVariable[] = Object.entries(
+            active.variables,
+          ).map(([key, value]) => ({
             key,
             value: String(value),
           }));
@@ -165,7 +186,7 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
           setActiveConfig(null);
           setVariables([]);
         }
-        
+
         setHasChanges(false);
       } else {
         setError(result.error || 'Failed to load environment configurations');
@@ -181,19 +202,25 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
   const switchConfiguration = async (configId: string) => {
     if (hasChanges) {
       const shouldSwitch = window.confirm(
-        'You have unsaved changes. Are you sure you want to switch configurations? Unsaved changes will be lost.'
+        'You have unsaved changes. Are you sure you want to switch configurations? Unsaved changes will be lost.',
       );
       if (!shouldSwitch) return;
     }
 
     try {
-      const result = await window.electron.envConfig.switch(projectId, configId);
-      
+      const result = await window.electron.envConfig.switch(
+        projectId,
+        configId,
+      );
+
       if (result.success) {
         setActiveConfigId(configId);
-        const config = envConfigs.find(c => c.id === configId);        if (config) {
+        const config = envConfigs.find((c) => c.id === configId);
+        if (config) {
           setActiveConfig(config);
-          const vars: EnvironmentVariable[] = Object.entries(config.variables).map(([key, value]) => ({
+          const vars: EnvironmentVariable[] = Object.entries(
+            config.variables,
+          ).map(([key, value]) => ({
             key,
             value: String(value),
           }));
@@ -209,10 +236,19 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
   };
 
   // Create new configuration
-  const createConfiguration = async (name: string, filename: string, template?: string) => {
+  const createConfiguration = async (
+    name: string,
+    filename: string,
+    template?: string,
+  ) => {
     try {
-      const result = await window.electron.envConfig.create(projectId, name, filename, template);
-      
+      const result = await window.electron.envConfig.create(
+        projectId,
+        name,
+        filename,
+        template,
+      );
+
       if (result.success && result.configuration) {
         // Reload configurations to get the updated list
         await loadEnvironmentConfigs();
@@ -226,18 +262,21 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
 
   // Delete configuration
   const deleteConfiguration = async (configId: string) => {
-    const config = envConfigs.find(c => c.id === configId);
+    const config = envConfigs.find((c) => c.id === configId);
     if (!config) return;
 
     const shouldDelete = window.confirm(
-      `Are you sure you want to delete the configuration "${config.displayName}"? This will also delete the file "${config.filename}".`
+      `Are you sure you want to delete the configuration "${config.displayName}"? This will also delete the file "${config.filename}".`,
     );
-    
+
     if (!shouldDelete) return;
 
     try {
-      const result = await window.electron.envConfig.remove(projectId, configId);
-      
+      const result = await window.electron.envConfig.remove(
+        projectId,
+        configId,
+      );
+
       if (result.success) {
         // Reload configurations to get the updated list
         await loadEnvironmentConfigs();
@@ -255,20 +294,26 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
 
     // Convert variables array back to record format
     const variablesRecord: Record<string, string> = {};
-    variables.forEach(variable => {
+    variables.forEach((variable) => {
       if (variable.key.trim()) {
         variablesRecord[variable.key.trim()] = variable.value;
       }
     });
 
     try {
-      const result = await window.electron.envConfig.save(projectId, activeConfig.id, variablesRecord);
-      
+      const result = await window.electron.envConfig.save(
+        projectId,
+        activeConfig.id,
+        variablesRecord,
+      );
+
       if (result.success) {
         // Update local state
         const updatedConfig = { ...activeConfig, variables: variablesRecord };
         setActiveConfig(updatedConfig);
-        setEnvConfigs(prev => prev.map(c => c.id === activeConfig.id ? updatedConfig : c));
+        setEnvConfigs((prev) =>
+          prev.map((c) => (c.id === activeConfig.id ? updatedConfig : c)),
+        );
         setHasChanges(false);
       } else {
         setError(result.error || 'Failed to save configuration');
@@ -285,19 +330,25 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
       value: '',
       isNew: true,
     };
-    setVariables(prev => [...prev, newVar]);
+    setVariables((prev) => [...prev, newVar]);
     setHasChanges(true);
   };
 
   const handleRemoveVariable = (index: number) => {
-    setVariables(prev => prev.filter((_, i) => i !== index));
+    setVariables((prev) => prev.filter((_, i) => i !== index));
     setHasChanges(true);
   };
 
-  const handleVariableChange = (index: number, field: 'key' | 'value', newValue: string) => {
-    setVariables(prev => prev.map((variable, i) => 
-      i === index ? { ...variable, [field]: newValue } : variable
-    ));
+  const handleVariableChange = (
+    index: number,
+    field: 'key' | 'value',
+    newValue: string,
+  ) => {
+    setVariables((prev) =>
+      prev.map((variable, i) =>
+        i === index ? { ...variable, [field]: newValue } : variable,
+      ),
+    );
     setHasChanges(true);
   };
 
@@ -329,7 +380,7 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
       <div className="tab-header">
         <h3>Environment Variables</h3>
         <div className="tab-actions">
-          <button 
+          <button
             className="button-icon"
             onClick={loadEnvironmentConfigs}
             title="Refresh configurations"
@@ -337,7 +388,7 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
           >
             <RefreshIcon />
           </button>
-          <button 
+          <button
             className="button-secondary"
             onClick={() => setShowCreateDialog(true)}
             title="Create new configuration"
@@ -352,8 +403,8 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
       {error && (
         <div className="error-message">
           {error}
-          <button 
-            className="button-link" 
+          <button
+            className="button-link"
             onClick={() => setError(null)}
             style={{ marginLeft: '8px' }}
           >
@@ -370,7 +421,9 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
             <select
               id="config-select"
               value={activeConfigId || ''}
-              onChange={(e) => e.target.value && switchConfiguration(e.target.value)}
+              onChange={(e) =>
+                e.target.value && switchConfiguration(e.target.value)
+              }
               disabled={loading}
             >
               {!activeConfigId && (
@@ -400,7 +453,7 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
       {/* Configuration Actions */}
       {activeConfig && (
         <div className="config-actions">
-          <button 
+          <button
             className="button-icon"
             onClick={handleAddVariable}
             title="Add variable"
@@ -408,7 +461,7 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
           >
             <PlusIcon />
           </button>
-          <button 
+          <button
             className={`button-primary ${!hasChanges ? 'disabled' : ''}`}
             onClick={saveConfiguration}
             title="Save changes (Ctrl+Enter)"
@@ -425,7 +478,9 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
         <div className="environment-variables">
           {variables.length === 0 ? (
             <div className="empty-state">
-              <p>No environment variables defined in {activeConfig.displayName}</p>
+              <p>
+                No environment variables defined in {activeConfig.displayName}
+              </p>
               <button className="button-secondary" onClick={handleAddVariable}>
                 Add First Variable
               </button>
@@ -438,12 +493,17 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
                 <div className="variable-actions-header">Actions</div>
               </div>
               {variables.map((variable, index) => (
-                <div key={index} className={`variable-row ${variable.isNew ? 'new-variable' : ''}`}>
+                <div
+                  key={index}
+                  className={`variable-row ${variable.isNew ? 'new-variable' : ''}`}
+                >
                   <input
                     type="text"
                     placeholder="VARIABLE_NAME"
                     value={variable.key}
-                    onChange={(e) => handleVariableChange(index, 'key', e.target.value)}
+                    onChange={(e) =>
+                      handleVariableChange(index, 'key', e.target.value)
+                    }
                     onKeyDown={(e) => handleKeyDown(e, index)}
                     className="variable-key-input"
                     disabled={loading}
@@ -452,7 +512,9 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
                     type="text"
                     placeholder="variable value"
                     value={variable.value}
-                    onChange={(e) => handleVariableChange(index, 'value', e.target.value)}
+                    onChange={(e) =>
+                      handleVariableChange(index, 'value', e.target.value)
+                    }
                     onKeyDown={(e) => handleKeyDown(e, index)}
                     className="variable-value-input"
                     disabled={loading}
@@ -473,7 +535,10 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
       ) : envConfigs.length === 0 ? (
         <div className="empty-state">
           <p>No environment configurations found</p>
-          <button className="button-primary" onClick={() => setShowCreateDialog(true)}>
+          <button
+            className="button-primary"
+            onClick={() => setShowCreateDialog(true)}
+          >
             Create First Configuration
           </button>
         </div>
@@ -489,7 +554,8 @@ export const EnvironmentTab: React.FC<EnvironmentTabProps> = ({ projectId }) => 
           <small>
             Configuration: {activeConfig.displayName} ({activeConfig.filename})
             {activeConfig.template && ` • Template: ${activeConfig.template}`}
-            {variables.length > 0 && ` • ${variables.length} variable${variables.length !== 1 ? 's' : ''}`}
+            {variables.length > 0 &&
+              ` • ${variables.length} variable${variables.length !== 1 ? 's' : ''}`}
             {hasChanges && ' • Unsaved changes'}
           </small>
         </div>

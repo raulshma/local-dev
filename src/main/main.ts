@@ -21,7 +21,12 @@ import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import StoreService from './services/store';
 import { ProjectDetectionService } from './services/projectDetection';
-import { AppSettings } from '../types';
+import { GitService } from './services/gitService';
+import { DockerService } from './services/dockerService';
+import { TrayService } from './services/trayService';
+import TerminalService from './services/terminalService';
+import { AppSettings, ScriptExecutionHistory, EnvironmentConfiguration, Project, ProjectScript, ScriptStatus, ScriptOutput, ProjectSettings } from '../types';
+import { BackgroundTaskService } from './services/backgroundTaskService';
 
 class AppUpdater {
   constructor() {
@@ -34,14 +39,97 @@ class AppUpdater {
 let mainWindow: BrowserWindow | null = null;
 let storeService: StoreService;
 let projectDetectionService: ProjectDetectionService;
+let trayService: TrayService;
+let backgroundTaskService: BackgroundTaskService;
+let terminalService: TerminalService;
 
 // Track running processes
 const runningProcesses = new Map<string, ChildProcess>();
+
+// Track script execution history (in memory for now, could be persisted later)
+const scriptExecutionHistory = new Map<string, ScriptExecutionHistory[]>(); // projectId -> history array
+
+// Helper functions for script execution history
+const addScriptExecutionHistory = (historyEntry: ScriptExecutionHistory) => {
+  const projectHistory = scriptExecutionHistory.get(historyEntry.projectId) || [];
+  projectHistory.unshift(historyEntry); // Add to beginning for latest first
+
+  // Keep only last 100 executions per project to prevent memory bloat
+  if (projectHistory.length > 100) {
+    projectHistory.splice(100);
+  }
+
+  scriptExecutionHistory.set(historyEntry.projectId, projectHistory);
+};
+
+const updateScriptExecutionHistory = (
+  projectId: string,
+  historyId: string,
+  updates: Partial<ScriptExecutionHistory>
+) => {
+  const projectHistory = scriptExecutionHistory.get(projectId) || [];
+  const historyIndex = projectHistory.findIndex(h => h.id === historyId);
+
+  if (historyIndex !== -1) {
+    projectHistory[historyIndex] = { ...projectHistory[historyIndex], ...updates };
+    scriptExecutionHistory.set(projectId, projectHistory);
+  }
+};
+
+const getScriptExecutionHistory = (projectId: string): ScriptExecutionHistory[] => {
+  return scriptExecutionHistory.get(projectId) || [];
+};
+
+const clearScriptExecutionHistory = (projectId: string) => {
+  scriptExecutionHistory.delete(projectId);
+};
 
 // Initialize store service
 const initializeStore = () => {
   storeService = new StoreService();
   projectDetectionService = new ProjectDetectionService();
+  trayService = new TrayService();
+  backgroundTaskService = new BackgroundTaskService(storeService);
+  terminalService = new TerminalService();
+  terminalService = new TerminalService();
+
+  // Initialize tray service with current notification settings
+  const appSettings = storeService.getSettings();
+  if ((appSettings as any).notifications) {
+    trayService.updateNotificationSettings((appSettings as any).notifications);
+  }
+
+  // Set up terminal service event handlers
+  terminalService.on('terminalData', (data) => {
+    // Send terminal data to the renderer process
+    if (mainWindow) {
+      mainWindow.webContents.send('terminal:data', data);
+    }
+  });
+
+  terminalService.on('terminalExit', (data) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('terminal:exit', data);
+    }
+  });
+
+  terminalService.on('terminalError', (data) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('terminal:error', data);
+    }
+  });
+
+  terminalService.on('terminalCreated', (data) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('terminal:created', data);
+    }
+  });
+
+  terminalService.on('terminalClosed', (data) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('terminal:closed', data);
+    }
+  });
 };
 
 // IPC Handlers for project management
@@ -59,7 +147,7 @@ const setupIpcHandlers = () => {
       properties: ['openDirectory'],
       title: 'Select Project Folder',
     });
-    
+
     return result.canceled ? null : result.filePaths[0];
   });
 
@@ -67,12 +155,12 @@ const setupIpcHandlers = () => {
   ipcMain.handle('project:add', async (event, name: string, projectPath: string) => {
     try {
       const project = storeService.addProject(name, projectPath);
-      
+
       // Auto-detect and add scripts
       try {
         const detectedTypes = await projectDetectionService.detectProjectType(projectPath);
         const detectedScripts = await projectDetectionService.generateScripts(projectPath, detectedTypes);
-        
+
         if (detectedScripts.length > 0) {
           storeService.addAutoDetectedScripts(project.id, detectedScripts);
         }
@@ -80,7 +168,14 @@ const setupIpcHandlers = () => {
         console.warn('Error during script auto-detection:', detectionError);
         // Continue without auto-detection if it fails
       }
-      
+
+      // Update tray with new projects
+      const projects = storeService.getProjects();
+      trayService.updateProjects(projects);
+
+      // Notify project added
+      trayService.notifyProjectAdded(project.name);
+
       return project;
     } catch (error) {
       console.error('Error adding project:', error);
@@ -90,10 +185,22 @@ const setupIpcHandlers = () => {
 
   ipcMain.handle('project:remove', async (event, id: string) => {
     try {
+      // Get project name before removing for notification
+      const project = storeService.getProject(id);
+      const projectName = project?.name || 'Unknown Project';
+
       const success = storeService.removeProject(id);
       if (!success) {
         throw new Error('Project not found');
       }
+
+      // Update tray with updated projects
+      const projects = storeService.getProjects();
+      trayService.updateProjects(projects);
+
+      // Notify project removed
+      trayService.notifyProjectRemoved(projectName);
+
       return true;
     } catch (error) {
       console.error('Error removing project:', error);
@@ -145,7 +252,7 @@ const setupIpcHandlers = () => {
 
       const detectedTypes = await projectDetectionService.detectProjectType(project.path);
       const detectedScripts = await projectDetectionService.generateScripts(project.path, detectedTypes);
-      
+
       return { success: true, scripts: detectedScripts, types: detectedTypes };
     } catch (error) {
       console.error('Error detecting scripts:', error);
@@ -162,9 +269,9 @@ const setupIpcHandlers = () => {
 
       const detectedTypes = await projectDetectionService.detectProjectType(project.path);
       const detectedScripts = await projectDetectionService.generateScripts(project.path, detectedTypes);
-      
+
       const success = storeService.addAutoDetectedScripts(projectId, detectedScripts);
-      
+
       return { success, scripts: detectedScripts, types: detectedTypes };
     } catch (error) {
       console.error('Error refreshing auto-detected scripts:', error);
@@ -181,8 +288,8 @@ const setupIpcHandlers = () => {
 
       const devCommand = await projectDetectionService.findBestDevCommand(project.path);
       if (!devCommand) {
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: 'No development command found for this project type',
           projectId
         };
@@ -196,7 +303,7 @@ const setupIpcHandlers = () => {
       console.log(`Dev command: ${devCommand.command}`);
       console.log(`Project type: ${devCommand.projectType}`);
       console.log(`Working directory: ${projectPath}`);
-      
+
       // Stop existing process if running
       if (runningProcesses.has(processKey)) {
         const existingProcess = runningProcesses.get(processKey);
@@ -214,11 +321,11 @@ const setupIpcHandlers = () => {
 
       // Platform-specific dev server execution handling
       let childProcess: ChildProcess;
-      
+
       if (process.platform === 'win32') {
         // On Windows, use more reliable approach with clean environment
         console.log('Starting dev server on Windows platform');
-        
+
         try {
           childProcess = spawn(command, args, {
             cwd: projectPath,
@@ -254,7 +361,7 @@ const setupIpcHandlers = () => {
       } else {
         // For non-Windows platforms
         console.log('Starting dev server on non-Windows platform');
-        
+
         try {
           childProcess = spawn(command, args, {
             cwd: projectPath,
@@ -354,17 +461,17 @@ const setupIpcHandlers = () => {
         });
       }
 
-      return { 
-        success: true, 
-        command: devCommand.command, 
+      return {
+        success: true,
+        command: devCommand.command,
         projectType: devCommand.projectType,
         pid: childProcess.pid,
         message: `Development server started successfully for project: ${project.name}`
       };
     } catch (error) {
       console.error('Error starting dev server:', error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
         projectId
       };
@@ -407,7 +514,7 @@ const setupIpcHandlers = () => {
     try {
       const project = storeService.getProject(projectId);
       const script = storeService.getScript(projectId, scriptId);
-      
+
       if (!project || !script) {
         throw new Error('Project or script not found');
       }
@@ -437,11 +544,11 @@ const setupIpcHandlers = () => {
 
       // Platform-specific script execution handling
       let childProcess: ChildProcess;
-      
+
       if (process.platform === 'win32') {
         // On Windows, use more reliable approach with clean environment
         console.log('Executing script on Windows platform');
-        
+
         try {
           childProcess = spawn(command, args, {
             cwd: projectPath,
@@ -477,7 +584,7 @@ const setupIpcHandlers = () => {
       } else {
         // For non-Windows platforms
         console.log('Executing script on non-Windows platform');
-        
+
         try {
           childProcess = spawn(command, args, {
             cwd: projectPath,
@@ -507,6 +614,16 @@ const setupIpcHandlers = () => {
       childProcess.stdout?.on('data', (data) => {
         const output = data.toString();
         console.log(`Script ${scriptId} stdout:`, output.trim());
+
+        // Update history with accumulated output
+        const projectHistory = getScriptExecutionHistory(projectId);
+        const latestExecution = projectHistory.find(h => h.scriptId === scriptId && h.status === 'running');
+        if (latestExecution) {
+          updateScriptExecutionHistory(projectId, latestExecution.id, {
+            output: latestExecution.output + output
+          });
+        }
+
         if (mainWindow) {
           mainWindow.webContents.send('script:output', {
             projectId,
@@ -520,6 +637,16 @@ const setupIpcHandlers = () => {
       childProcess.stderr?.on('data', (data) => {
         const output = data.toString();
         console.log(`Script ${scriptId} stderr:`, output.trim());
+
+        // Update history with accumulated output (including stderr)
+        const projectHistory = getScriptExecutionHistory(projectId);
+        const latestExecution = projectHistory.find(h => h.scriptId === scriptId && h.status === 'running');
+        if (latestExecution) {
+          updateScriptExecutionHistory(projectId, latestExecution.id, {
+            output: latestExecution.output + output
+          });
+        }
+
         if (mainWindow) {
           mainWindow.webContents.send('script:output', {
             projectId,
@@ -533,6 +660,21 @@ const setupIpcHandlers = () => {
       childProcess.on('close', (code, signal) => {
         console.log(`Script ${scriptId} closed with code: ${code}, signal: ${signal}`);
         runningProcesses.delete(processKey);
+
+        // Update execution history on completion
+        const projectHistory = getScriptExecutionHistory(projectId);
+        const latestExecution = projectHistory.find(h => h.scriptId === scriptId && h.status === 'running');
+        if (latestExecution) {
+          const endTime = new Date().toISOString();
+          const duration = Date.now() - new Date(latestExecution.startTime).getTime();
+          updateScriptExecutionHistory(projectId, latestExecution.id, {
+            status: code === 0 ? 'completed' : 'failed',
+            endTime,
+            duration,
+            exitCode: code || undefined
+          });
+        }
+
         if (mainWindow) {
           mainWindow.webContents.send('script:status', {
             projectId,
@@ -547,6 +689,21 @@ const setupIpcHandlers = () => {
       childProcess.on('error', (error) => {
         console.error(`Script ${scriptId} error:`, error);
         runningProcesses.delete(processKey);
+
+        // Update execution history on error
+        const projectHistory = getScriptExecutionHistory(projectId);
+        const latestExecution = projectHistory.find(h => h.scriptId === scriptId && h.status === 'running');
+        if (latestExecution) {
+          const endTime = new Date().toISOString();
+          const duration = Date.now() - new Date(latestExecution.startTime).getTime();
+          updateScriptExecutionHistory(projectId, latestExecution.id, {
+            status: 'failed',
+            endTime,
+            duration,
+            error: error.message
+          });
+        }
+
         if (mainWindow) {
           mainWindow.webContents.send('script:status', {
             projectId,
@@ -562,6 +719,19 @@ const setupIpcHandlers = () => {
         console.log(`Script ${scriptId} exited with code: ${code}, signal: ${signal}`);
         if (runningProcesses.has(processKey)) {
           runningProcesses.delete(processKey);
+
+          // Update tray - remove running script
+          trayService.removeRunningScript(script.name);
+
+          // Notify based on exit code
+          if (code === 0) {
+            // Script completed successfully
+            trayService.notifyScriptCompleted(project.name, script.name);
+          } else {
+            // Script failed
+            const errorMessage = signal ? `killed by ${signal}` : `exit code ${code}`;
+            trayService.notifyScriptError(project.name, script.name, errorMessage);
+          }
         }
       });
 
@@ -577,16 +747,35 @@ const setupIpcHandlers = () => {
         });
       }
 
-      return { 
-        success: true, 
+      // Add execution to history
+      const historyId = `${projectId}-${scriptId}-${Date.now()}`;
+      addScriptExecutionHistory({
+        id: historyId,
+        projectId,
+        scriptId,
+        scriptName: script.name,
+        command: script.command,
+        startTime: new Date().toISOString(),
+        status: 'running',
+        output: '', // Will be accumulated from stdout/stderr
+      });
+
+      // Update tray with running script
+      trayService.addRunningScript(script.name, script.command, childProcess.pid);
+
+      // Notify script started
+      trayService.notifyScriptStarted(project.name, script.name);
+
+      return {
+        success: true,
         pid: childProcess.pid,
         command: script.command,
         message: `Script "${script.name}" started successfully`
       };
     } catch (error) {
       console.error('Error executing script:', error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
         scriptId,
         projectId
@@ -598,13 +787,13 @@ const setupIpcHandlers = () => {
     try {
       const processKey = `${projectId}:${scriptId}`;
       const process = runningProcesses.get(processKey);
-      
+
       console.log(`Attempting to stop script: ${scriptId} for project: ${projectId}`);
-      
+
       if (!process) {
         console.log(`No running process found for script: ${scriptId}`);
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: 'Process not found or already stopped',
           scriptId,
           projectId
@@ -612,17 +801,23 @@ const setupIpcHandlers = () => {
       }
 
       console.log(`Terminating process with PID: ${process.pid} for script: ${scriptId}`);
-      
+
       // Send SIGTERM first for graceful shutdown
       process.kill('SIGTERM');
-      
+
       // Force kill after 5 seconds if not terminated gracefully
       const forceKillTimeout = setTimeout(() => {
         if (runningProcesses.has(processKey)) {
           console.log(`Force killing script process: ${scriptId} (SIGKILL)`);
           process.kill('SIGKILL');
           runningProcesses.delete(processKey);
-          
+
+          // Get script name for tray update
+          const script = storeService.getScript(projectId, scriptId);
+          if (script) {
+            trayService.removeRunningScript(script.name);
+          }
+
           // Send force stopped status
           if (mainWindow) {
             mainWindow.webContents.send('script:status', {
@@ -641,16 +836,27 @@ const setupIpcHandlers = () => {
         console.log(`Script process ${scriptId} terminated gracefully`);
       });
 
-      return { 
-        success: true, 
+      // Update execution history on stop - find the latest running execution for this script
+      const projectHistory = getScriptExecutionHistory(projectId);
+      const latestExecution = projectHistory.find(h => h.scriptId === scriptId && h.status === 'running');
+      if (latestExecution) {
+        updateScriptExecutionHistory(projectId, latestExecution.id, {
+          status: 'cancelled',
+          endTime: new Date().toISOString(),
+          duration: Date.now() - new Date(latestExecution.startTime).getTime(),
+        });
+      }
+
+      return {
+        success: true,
         message: `Termination signal sent to script: ${scriptId}`,
         scriptId,
         projectId
       };
     } catch (error) {
       console.error('Error stopping script:', error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
         scriptId,
         projectId
@@ -663,9 +869,9 @@ const setupIpcHandlers = () => {
       const processKey = `${projectId}:${scriptId}`;
       const isRunning = runningProcesses.has(processKey);
       const process = runningProcesses.get(processKey);
-      
+
       console.log(`Checking if script ${scriptId} is running: ${isRunning}`);
-      
+
       return {
         success: true,
         isRunning,
@@ -685,6 +891,40 @@ const setupIpcHandlers = () => {
     }
   });
 
+  // Script execution history handlers
+  ipcMain.handle('script:get-execution-history', async (event, projectId: string) => {
+    try {
+      const history = getScriptExecutionHistory(projectId);
+      return {
+        success: true,
+        history
+      };
+    } catch (error) {
+      console.error('Error getting script execution history:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        history: []
+      };
+    }
+  });
+
+  ipcMain.handle('script:clear-execution-history', async (event, projectId: string) => {
+    try {
+      clearScriptExecutionHistory(projectId);
+      return {
+        success: true,
+        message: 'Script execution history cleared'
+      };
+    } catch (error) {
+      console.error('Error clearing script execution history:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
   // Environment variable handlers
   ipcMain.handle('env:load', async (event, projectId: string) => {
     try {
@@ -694,25 +934,25 @@ const setupIpcHandlers = () => {
       }
 
       const envPath = path.join(project.path, '.env');
-      
+
       if (!existsSync(envPath)) {
         return { success: true, exists: false, variables: {} };
       }
 
       const envContent = await fs.readFile(envPath, 'utf-8');
       const parsed = dotenv.parse(envContent);
-      
-      return { 
-        success: true, 
-        exists: true, 
+
+      return {
+        success: true,
+        exists: true,
         variables: parsed,
-        originalContent: envContent 
+        originalContent: envContent
       };
     } catch (error) {
       console.error('Error loading .env file:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   });
@@ -725,7 +965,7 @@ const setupIpcHandlers = () => {
       }
 
       const envPath = path.join(project.path, '.env');
-      
+
       // Create backup if file exists
       if (existsSync(envPath)) {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -738,7 +978,7 @@ const setupIpcHandlers = () => {
         .map(([key, value]) => {
           // Escape quotes and handle multiline values
           const escapedValue = value.includes('\n') || value.includes('"') || value.includes("'")
-            ? `"${value.replace(/"/g, '\\"')}"` 
+            ? `"${value.replace(/"/g, '\\"')}"`
             : value;
           return `${key}=${escapedValue}`;
         })
@@ -746,15 +986,15 @@ const setupIpcHandlers = () => {
 
       // Add trailing newline
       const finalContent = envContent ? `${envContent}\n` : '';
-      
+
       await fs.writeFile(envPath, finalContent, 'utf-8');
-      
+
       return { success: true };
     } catch (error) {
       console.error('Error saving .env file:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   });
@@ -767,22 +1007,22 @@ const setupIpcHandlers = () => {
       }
 
       const envPath = path.join(project.path, '.env');
-      
+
       if (!existsSync(envPath)) {
         return { success: false, error: '.env file does not exist' };
       }
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const backupPath = path.join(project.path, `.env.bak-${timestamp}`);
-      
+
       await fs.copyFile(envPath, backupPath);
-      
+
       return { success: true, backupPath };
     } catch (error) {
       console.error('Error creating .env backup:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   });
@@ -845,10 +1085,10 @@ const setupIpcHandlers = () => {
 
         try {
           console.log(`Attempting to open IDE: ${resolvedIDECommand} with path: ${projectPath}`);
-          
+
           // Special handling for different IDE commands
           let spawnArgs: string[] = [];
-          
+
           if (ideCommand.toLowerCase() === 'code') {
             // For VS Code, we'll use a simple approach without start command
             // Just running 'code' with the path argument directly
@@ -857,9 +1097,9 @@ const setupIpcHandlers = () => {
             // For other IDEs, use normal approach
             spawnArgs = ['/c', ideCommand, projectPath];
           }
-          
+
           console.log(`Executing command: cmd.exe ${spawnArgs.join(' ')}`);
-          
+
           const ideProcess = spawn('cmd.exe', spawnArgs, {
             stdio: 'ignore',  // Don't inherit stdio to avoid Node.js environment bleeding
             detached: true,   // Detach the process completely
@@ -921,9 +1161,9 @@ const setupIpcHandlers = () => {
       }
     } catch (error) {
       console.error('Error opening IDE:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   });
@@ -959,7 +1199,7 @@ const setupIpcHandlers = () => {
       const platform = os.platform();
 
       console.log(`Opening terminal for project: ${project.name} at path: ${projectPath}`);
-      
+
       return new Promise((resolve) => {
         try {
           if (platform === 'win32') {
@@ -967,19 +1207,19 @@ const setupIpcHandlers = () => {
             const terminalCommand = effectiveSettings.terminalCommand || 'powershell.exe';
             const command = `start "" "${terminalCommand}" -NoExit -Command "cd '${projectPath.replace(/\\/g, '\\')}'"`;
             console.log(`Executing command: ${command}`);
-            
+
             const result = spawn('cmd.exe', ['/c', command], {
               detached: true,
               stdio: 'ignore',
               shell: true,
               windowsHide: true
             });
-            
+
             result.on('error', (error) => {
               console.error('Failed to open terminal:', error);
               resolve({ success: false, error: error.message });
             });
-            
+
             // Give it a moment to start
             setTimeout(() => {
               try {
@@ -992,13 +1232,13 @@ const setupIpcHandlers = () => {
                 }
               } catch (e) {
                 console.error('Terminal process failed to start');
-                resolve({ 
-                  success: false, 
-                  error: 'Failed to start terminal. Make sure the terminal application is installed.' 
+                resolve({
+                  success: false,
+                  error: 'Failed to start terminal. Make sure the terminal application is installed.'
                 });
               }
             }, 1000);
-            
+
           } else {
             // For non-Windows platforms (macOS/Linux)
             let command: string;
@@ -1013,20 +1253,20 @@ const setupIpcHandlers = () => {
               };
               command = terminals[platform as keyof typeof terminals] || terminals.default;
             }
-            
+
             console.log(`Executing command: ${command}`);
-            
+
             const result = spawn(command, {
               shell: true,
               detached: true,
               stdio: 'ignore'
             });
-            
+
             result.on('error', (error) => {
               console.error('Failed to open terminal:', error);
               resolve({ success: false, error: error.message });
             });
-            
+
             result.unref();
             console.log('Successfully opened terminal');
             resolve({ success: true });
@@ -1034,9 +1274,9 @@ const setupIpcHandlers = () => {
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           console.error('Error opening terminal:', errorMessage);
-          resolve({ 
-            success: false, 
-            error: `Failed to open terminal: ${errorMessage}` 
+          resolve({
+            success: false,
+            error: `Failed to open terminal: ${errorMessage}`
           });
         }
       });
@@ -1061,6 +1301,12 @@ const setupIpcHandlers = () => {
   ipcMain.handle('settings:update', async (event, settings: Partial<AppSettings>) => {
     try {
       storeService.updateSettings(settings);
+
+      // Update tray notification settings if they changed
+      if ((settings as any).notifications) {
+        trayService.updateNotificationSettings((settings as any).notifications);
+      }
+
       return { success: true };
     } catch (error) {
       console.error('Error updating settings:', error);
@@ -1073,8 +1319,8 @@ const setupIpcHandlers = () => {
     try {
       const projectSettings = storeService.getProjectSettings(projectId);
       const effectiveSettings = storeService.getEffectiveSettings(projectId);
-      return { 
-        success: true, 
+      return {
+        success: true,
         projectSettings,
         effectiveSettings
       };
@@ -1096,119 +1342,1089 @@ const setupIpcHandlers = () => {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
-};
 
-if (process.env.NODE_ENV === 'production') {
-  const sourceMapSupport = require('source-map-support');
-  sourceMapSupport.install();
-}
+  // Environment configuration handlers
+  ipcMain.handle('env-config:load', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
 
-const isDebug =
-  process.env.NODE_ENV === 'development' || process.env.DEBUG_PROD === 'true';
+      // Get environment configuration metadata from project settings
+      const envMetadata = project.settings?.environmentConfig || {
+        activeConfigId: undefined,
+        configurations: []
+      };
 
-if (isDebug) {
-  require('electron-debug').default();
-}
+      // Scan for environment files in the project directory
+      const envFiles = ['.env', '.env.dev', '.env.development', '.env.staging', '.env.production', '.env.test', '.env.local'];
+      const foundConfigurations: EnvironmentConfiguration[] = [];
 
-const installExtensions = async () => {
-  const installer = require('electron-devtools-installer');
-  const forceDownload = !!process.env.UPGRADE_EXTENSIONS;
-  const extensions = ['REACT_DEVELOPER_TOOLS'];
+      for (const filename of envFiles) {
+        const envPath = path.join(project.path, filename);
+        if (existsSync(envPath)) {
+          const envContent = await fs.readFile(envPath, 'utf-8');
+          const parsed = dotenv.parse(envContent);
 
-  return installer
-    .default(
-      extensions.map((name) => installer[name]),
-      forceDownload,
-    )
-    .catch(console.log);
-};
+          // Check if this configuration already exists in metadata
+          let existingConfig = envMetadata.configurations.find((c: EnvironmentConfiguration) => c.filename === filename);
+          if (!existingConfig) {
+            // Create new configuration entry
+            existingConfig = {
+              id: `${filename}-${Date.now()}`,
+              name: getDisplayNameForEnvFile(filename),
+              filename: filename,
+              displayName: getDisplayNameForEnvFile(filename),
+              variables: parsed,
+              exists: true,
+              lastModified: new Date().toISOString()
+            };
+          } else {
+            // Update existing configuration
+            existingConfig.variables = parsed;
+            existingConfig.exists = true;
+            existingConfig.lastModified = new Date().toISOString();
+          }
 
-const createWindow = async () => {
-  if (isDebug) {
-    await installExtensions();
+          foundConfigurations.push(existingConfig);
+        }
+      }
+
+      // Check for custom environment files referenced in metadata but not in standard list
+      for (const config of envMetadata.configurations) {
+        if (!envFiles.includes(config.filename)) {
+          const envPath = path.join(project.path, config.filename);
+          if (existsSync(envPath)) {
+            const envContent = await fs.readFile(envPath, 'utf-8');
+            const parsed = dotenv.parse(envContent);
+
+            config.variables = parsed;
+            config.exists = true;
+            config.lastModified = new Date().toISOString();
+            foundConfigurations.push(config);
+          } else {
+            // Mark as not existing but keep in list
+            config.exists = false;
+            foundConfigurations.push(config);
+          }
+        }
+      }
+
+      // Update metadata with found configurations
+      envMetadata.configurations = foundConfigurations;
+
+      // Set default active configuration if none is set
+      if (!envMetadata.activeConfigId && foundConfigurations.length > 0) {
+        // Prefer .env if it exists, otherwise take the first one
+        const defaultConfig = foundConfigurations.find(c => c.filename === '.env') || foundConfigurations[0];
+        envMetadata.activeConfigId = defaultConfig.id;
+      }
+
+      // Mark active configuration
+      foundConfigurations.forEach(config => {
+        config.isActive = config.id === envMetadata.activeConfigId;
+      });
+
+      return {
+        success: true,
+        metadata: envMetadata
+      };
+    } catch (error) {
+      console.error('Error loading environment configurations:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('env-config:switch', async (event, projectId: string, configId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      // Update project settings with new active configuration
+      const updatedProject = {
+        ...project,
+        settings: {
+          ...project.settings,
+          environmentConfig: {
+            ...project.settings?.environmentConfig,
+            activeConfigId: configId
+          }
+        }
+      };
+
+      storeService.updateProject(updatedProject);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error switching environment configuration:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('env-config:create', async (event, projectId: string, name: string, filename: string, template?: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const envPath = path.join(project.path, filename);
+
+      // Check if file already exists
+      if (existsSync(envPath)) {
+        return {
+          success: false,
+          error: 'Environment file already exists'
+        };
+      }
+
+      // Get template variables
+      const templateVariables = getTemplateVariables(template);
+
+      // Create new configuration
+      const newConfig = {
+        id: `${filename}-${Date.now()}`,
+        name: name,
+        filename: filename,
+        displayName: name,
+        template: template,
+        variables: templateVariables,
+        exists: true,
+        lastModified: new Date().toISOString()
+      };
+
+      // Create the environment file with template content
+      const envContent = Object.entries(templateVariables)
+        .map(([key, value]) => `${key}=${value}`)
+        .join('\n');
+
+      await fs.writeFile(envPath, envContent ? `${envContent}\n` : '', 'utf-8');
+
+      // Update project settings
+      const envMetadata = project.settings?.environmentConfig || {
+        activeConfigId: undefined,
+        configurations: []
+      };
+
+      envMetadata.configurations.push(newConfig);
+
+      const updatedProject = {
+        ...project,
+        settings: {
+          ...project.settings,
+          environmentConfig: envMetadata
+        }
+      };
+
+      storeService.updateProject(updatedProject);
+
+      return {
+        success: true,
+        configuration: newConfig
+      };
+    } catch (error) {
+      console.error('Error creating environment configuration:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('env-config:save', async (event, projectId: string, configId: string, variables: Record<string, string>) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const envMetadata = project.settings?.environmentConfig;
+      if (!envMetadata) {
+        throw new Error('No environment configuration found');
+      }
+
+      const config = envMetadata.configurations.find((c: EnvironmentConfiguration) => c.id === configId);
+      if (!config) {
+        throw new Error('Configuration not found');
+      }
+
+      const envPath = path.join(project.path, config.filename);
+
+      // Create backup if file exists
+      if (existsSync(envPath)) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = path.join(project.path, `${config.filename}.bak-${timestamp}`);
+        await fs.copyFile(envPath, backupPath);
+      }
+
+      // Construct .env content from variables
+      const envContent = Object.entries(variables)
+        .map(([key, value]) => {
+          const escapedValue = value.includes('\n') || value.includes('"') || value.includes("'")
+            ? `"${value.replace(/"/g, '\\"')}"`
+            : value;
+          return `${key}=${escapedValue}`;
+        })
+        .join('\n');
+
+      await fs.writeFile(envPath, envContent ? `${envContent}\n` : '', 'utf-8');
+
+      // Update configuration metadata
+      config.variables = variables;
+      config.lastModified = new Date().toISOString();
+
+      const updatedProject = {
+        ...project,
+        settings: {
+          ...project.settings,
+          environmentConfig: envMetadata
+        }
+      };
+
+      storeService.updateProject(updatedProject);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error saving environment configuration:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('env-config:delete', async (event, projectId: string, configId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const envMetadata = project.settings?.environmentConfig;
+      if (!envMetadata) {
+        throw new Error('No environment configuration found');
+      }
+
+      const config = envMetadata.configurations.find((c: EnvironmentConfiguration) => c.id === configId);
+      if (!config) {
+        throw new Error('Configuration not found');
+      }
+
+      const envPath = path.join(project.path, config.filename);
+
+      // Delete the file if it exists
+      if (existsSync(envPath)) {
+        await fs.unlink(envPath);
+      }
+
+      // Remove from configurations list
+      envMetadata.configurations = envMetadata.configurations.filter(c => c.id !== configId);
+
+      // If this was the active configuration, switch to another one
+      if (envMetadata.activeConfigId === configId) {
+        envMetadata.activeConfigId = envMetadata.configurations.length > 0
+          ? envMetadata.configurations[0].id
+          : undefined;
+      }
+
+      const updatedProject = {
+        ...project,
+        settings: {
+          ...project.settings,
+          environmentConfig: envMetadata
+        }
+      };
+
+      storeService.updateProject(updatedProject);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting environment configuration:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  // Environment configuration handlers END
+
+  // Helper functions for environment configuration
+  function getDisplayNameForEnvFile(filename: string): string {
+    const nameMap: Record<string, string> = {
+      '.env': 'Default',
+      '.env.dev': 'Development',
+      '.env.development': 'Development',
+      '.env.staging': 'Staging',
+      '.env.production': 'Production',
+      '.env.test': 'Testing',
+      '.env.local': 'Local'
+    };
+    return nameMap[filename] || filename.replace('.env.', '').replace('.env', 'Custom');
   }
 
-  const RESOURCES_PATH = app.isPackaged
-    ? path.join(process.resourcesPath, 'assets')
-    : path.join(__dirname, '../../assets');
+  function getTemplateVariables(template?: string): Record<string, string> {
+    const templates: Record<string, Record<string, string>> = {
+      'development': {
+        'NODE_ENV': 'development',
+        'API_URL': 'http://localhost:3001',
+        'DATABASE_URL': 'postgres://localhost:5432/myapp_dev',
+        'DEBUG': 'true',
+        'LOG_LEVEL': 'debug'
+      },
+      'staging': {
+        'NODE_ENV': 'staging',
+        'API_URL': 'https://api-staging.example.com',
+        'DATABASE_URL': 'postgres://staging-db:5432/myapp_staging',
+        'DEBUG': 'false',
+        'LOG_LEVEL': 'info'
+      },
+      'production': {
+        'NODE_ENV': 'production',
+        'API_URL': 'https://api.example.com',
+        'DATABASE_URL': '',
+        'DEBUG': 'false',
+        'LOG_LEVEL': 'error',
+        'SECURE': 'true'
+      },
+      'testing': {
+        'NODE_ENV': 'test',
+        'API_URL': 'http://localhost:3001',
+        'DATABASE_URL': 'postgres://localhost:5432/myapp_test',
+        'DEBUG': 'true',
+        'LOG_LEVEL': 'debug',
+        'TEST_TIMEOUT': '30000'
+      }
+    };
 
-  const getAssetPath = (...paths: string[]): string => {
-    return path.join(RESOURCES_PATH, ...paths);
-  };
+    return templates[template || ''] || {};
+  }
 
+  // Environment variable handlers
+
+  // Git handlers
+  ipcMain.handle('git:check-repository', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const isRepo = await GitService.isGitRepository(project.path);
+
+      return { success: true, isRepository: isRepo };
+    } catch (error) {
+      console.error('Error checking git repository:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:get-status', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const status = await GitService.getGitStatus(project.path);
+
+      return { success: true, status };
+    } catch (error) {
+      console.error('Error getting git status:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:get-current-branch', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const branch = await GitService.getCurrentBranch(project.path);
+
+      return { success: true, branch };
+    } catch (error) {
+      console.error('Error getting current branch:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:get-branches', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const branches = await GitService.getBranches(project.path);
+
+      return { success: true, branches };
+    } catch (error) {
+      console.error('Error getting branches:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:get-remote-status', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const remoteStatus = await GitService.getRemoteStatus(project.path);
+
+      return { success: true, remoteStatus };
+    } catch (error) {
+      console.error('Error getting remote status:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:get-recent-commits', async (event, projectId: string, limit: number = 10) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const commits = await GitService.getRecentCommits(project.path, limit);
+
+      return { success: true, commits };
+    } catch (error) {
+      console.error('Error getting recent commits:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:switch-branch', async (event, projectId: string, branchName: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      await GitService.switchBranch(project.path, branchName);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error switching branch:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:pull', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const result = await GitService.pullChanges(project.path);
+
+      return { success: true, result };
+    } catch (error) {
+      console.error('Error pulling changes:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:push', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const result = await GitService.pushChanges(project.path);
+
+      return { success: true, result };
+    } catch (error) {
+      console.error('Error pushing changes:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:stage-files', async (event, projectId: string, files: string[]) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      // For now, use stageAllChanges as there's no stageFiles method
+      // TODO: Add specific stageFiles method to GitService if needed
+      const result = await GitService.stageAllChanges(project.path);
+
+      return { success: true, result };
+    } catch (error) {
+      console.error('Error staging files:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:commit', async (event, projectId: string, message: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const result = await GitService.commitChanges(project.path, message);
+
+      return { success: true, result };
+    } catch (error) {
+      console.error('Error committing changes:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:get-diff', async (event, projectId: string, filePath?: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const diff = await GitService.getDiff(project.path, filePath);
+
+      return { success: true, diff };
+    } catch (error) {
+      console.error('Error getting diff:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:get-changed-files', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const files = await GitService.getChangedFiles(project.path);
+
+      return { success: true, files };
+    } catch (error) {
+      console.error('Error getting changed files:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:create-stash', async (event, projectId: string, message?: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const result = await GitService.createStash(project.path, message);
+
+      return result;
+    } catch (error) {
+      console.error('Error creating stash:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:get-stashes', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const stashes = await GitService.getStashes(project.path);
+
+      return { success: true, stashes };
+    } catch (error) {
+      console.error('Error getting stashes:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:apply-stash', async (event, projectId: string, stashIndex: number) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const result = await GitService.applyStash(project.path, stashIndex);
+
+      return result;
+    } catch (error) {
+      console.error('Error applying stash:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:drop-stash', async (event, projectId: string, stashIndex: number) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const result = await GitService.dropStash(project.path, stashIndex);
+
+      return result;
+    } catch (error) {
+      console.error('Error dropping stash:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('git:pop-stash', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const result = await GitService.popStash(project.path);
+
+      return result;
+    } catch (error) {
+      console.error('Error popping stash:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  // Docker Integration IPC handlers
+  ipcMain.handle('docker:detect-configuration', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const config = await DockerService.detectDockerConfiguration(project.path);
+
+      return {
+        success: true,
+        config
+      };
+    } catch (error) {
+      console.error('Error detecting Docker configuration:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('docker:generate-scripts', async (event, projectId: string) => {
+    try {
+      const project = storeService.getProject(projectId);
+      if (!project) {
+        throw new Error('Project not found');
+      }
+
+      const config = await DockerService.detectDockerConfiguration(project.path);
+      const scripts = DockerService.generateDockerScripts(project.path, config);
+
+      return {
+        success: true,
+        scripts
+      };
+    } catch (error) {
+      console.error('Error generating Docker scripts:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('docker:is-available', async () => {
+    try {
+      const isAvailable = await DockerService.isDockerAvailable();
+
+      return {
+        success: true,
+        isAvailable
+      };
+    } catch (error) {
+      console.error('Error checking Docker availability:', error);
+      return {
+        success: false,
+        isAvailable: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('docker:get-containers', async () => {
+    try {
+      const containers = await DockerService.getRunningContainers();
+
+      return {
+        success: true,
+        containers
+      };
+    } catch (error) {
+      console.error('Error getting Docker containers:', error);
+      return {
+        success: false,
+        containers: [],
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('docker:get-images', async () => {
+    try {
+      const images = await DockerService.getDockerImages();
+
+      return {
+        success: true,
+        images
+      };
+    } catch (error) {
+      console.error('Error getting Docker images:', error);
+      return {
+        success: false,
+        images: [],
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  // Background operation handlers
+  ipcMain.handle('background:start', async () => {
+    try {
+      backgroundTaskService.start();
+      return { success: true };
+    } catch (error) {
+      console.error('Error starting background tasks:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('background:stop', async () => {
+    try {
+      backgroundTaskService.stop();
+      return { success: true };
+    } catch (error) {
+      console.error('Error stopping background tasks:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('background:restart', async () => {
+    try {
+      backgroundTaskService.restart();
+      return { success: true };
+    } catch (error) {
+      console.error('Error restarting background tasks:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('background:status', async () => {
+    try {
+      const status = backgroundTaskService.getTaskStatus();
+      return { success: true, ...status };
+    } catch (error) {
+      console.error('Error getting background task status:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('background:update-config', async (event, settings: Partial<AppSettings>) => {
+    try {
+      // Update the settings in store first
+      storeService.updateSettings(settings);
+
+      // Get the full updated settings and update background task service
+      const fullSettings = storeService.getSettings();
+      backgroundTaskService.updateSettings(fullSettings);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating background task config:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Background task IPC handlers
+  ipcMain.on('show-background-status', () => {
+    if (mainWindow) {
+      mainWindow.webContents.send('show-background-status');
+    }
+  });
+
+  ipcMain.on('restart-background-tasks', () => {
+    backgroundTaskService.restart();
+    if (mainWindow) {
+      mainWindow.webContents.send('background-tasks-restarted');
+    }
+  });
+
+  ipcMain.on('minimize-to-tray', () => {
+    trayService.enableMinimalMode(backgroundTaskService);
+  });
+
+  // Terminal IPC handlers
+  ipcMain.handle('terminal:create', async (event, options: { id: string; shell?: string; cwd?: string; env?: Record<string, string>; cols?: number; rows?: number }) => {
+    try {
+      const success = terminalService.createTerminal(options);
+      return { success };
+    } catch (error) {
+      console.error('Error creating terminal:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('terminal:write', async (event, id: string, data: string) => {
+    try {
+      const success = terminalService.writeToTerminal(id, data);
+      return { success };
+    } catch (error) {
+      console.error('Error writing to terminal:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('terminal:resize', async (event, id: string, cols: number, rows: number) => {
+    try {
+      const success = terminalService.resizeTerminal(id, cols, rows);
+      return { success };
+    } catch (error) {
+      console.error('Error resizing terminal:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('terminal:kill', async (event, id: string) => {
+    try {
+      const success = terminalService.killTerminal(id);
+      return { success };
+    } catch (error) {
+      console.error('Error killing terminal:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('terminal:list', async () => {
+    try {
+      const terminals = terminalService.getActiveTerminals();
+      return { success: true, terminals };
+    } catch (error) {
+      console.error('Error listing terminals:', error);
+      return { success: false, terminals: [], error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('terminal:execute', async (event, id: string, command: string) => {
+    try {
+      const success = terminalService.executeCommand(id, command);
+      return { success };
+    } catch (error) {
+      console.error('Error executing command in terminal:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('terminal:cd', async (event, id: string, directory: string) => {
+    try {
+      const success = terminalService.changeDirectory(id, directory);
+      return { success };
+    } catch (error) {
+      console.error('Error changing directory in terminal:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('terminal:info', async (event, id: string) => {
+    try {
+      const info = terminalService.getTerminalInfo(id);
+      return { success: true, info };
+    } catch (error) {
+      console.error('Error getting terminal info:', error);
+      return { success: false, info: null, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+};
+
+app.on('ready', async () => {
+  // Initialize store and services
+  initializeStore();
+
+  // Set up IPC handlers
+  setupIpcHandlers();
+
+  // Create the main window
   mainWindow = new BrowserWindow({
-    show: false,
+    // Use 'app' protocol for file URLs to work correctly with Electron 15+
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      enableRemoteModule: false,
+      // Additional security measures
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      // Disable nodeIntegration for security
+      nodeIntegration: false,
+    },
+    // Remove default menu bar
+    autoHideMenuBar: true,
+    // Enable transparent window
+    transparent: true,
+    // Frameless window
+    frame: false,
+    // Initial size
     width: 1200,
     height: 800,
+    // Minimum size
     minWidth: 800,
     minHeight: 600,
-    icon: getAssetPath('icon.png'),
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    frame: process.platform !== 'darwin',
-    backgroundColor: '#1e1e1e', // VS Code dark background
-    webPreferences: {
-      preload: app.isPackaged
-        ? path.join(__dirname, 'preload.js')
-        : path.join(__dirname, '../../.erb/dll/preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true,
-      backgroundThrottling: false,
-    },
+    // Background color
+    backgroundColor: '#ffffff',
+    // Icon
+    icon: path.join(__dirname, 'assets', 'icon.png'),
   });
 
+  // Load the index.html file
   mainWindow.loadURL(resolveHtmlPath('index.html'));
 
-  mainWindow.on('ready-to-show', () => {
-    if (!mainWindow) {
-      throw new Error('"mainWindow" is not defined');
-    }
-    if (process.env.START_MINIMIZED) {
-      mainWindow.minimize();
-    } else {
-      mainWindow.show();
-    }
-  });
+  // Open the DevTools initially (for development)
+  if (process.env.NODE_ENV === 'development') {
+    mainWindow.webContents.openDevTools({ detach: true });
+  }
 
+  // Handle window closed
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 
-  const menuBuilder = new MenuBuilder(mainWindow);
-  menuBuilder.buildMenu();
+  // Initialize the app menu
+  MenuBuilder.buildMenu();
+});
 
-  // Open urls in the user's browser
-  mainWindow.webContents.setWindowOpenHandler((edata) => {
-    shell.openExternal(edata.url);
-    return { action: 'deny' };
-  });
+// App cleanup handlers
+app.on('before-quit', () => {
+  // Cleanup terminal service
+  if (terminalService) {
+    terminalService.cleanup();
+  }
 
-  // Remove this if your app does not use auto updates
-  // eslint-disable-next-line
-  new AppUpdater();
-};
+  // Cleanup background task service
+  if (backgroundTaskService) {
+    backgroundTaskService.stop();
+  }
+});
 
-/**
- * Add event listeners...
- */
-
+// Quit the app when all windows are closed
 app.on('window-all-closed', () => {
-  // Respect the OSX convention of having the application in memory even
-  // after all windows have been closed
+  // On macOS, it's common to keep the app running even when all windows are closed
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
-app
-  .whenReady()
-  .then(() => {
-    initializeStore();
-    setupIpcHandlers();
-    createWindow();
-    app.on('activate', () => {
-      // On macOS it's common to re-create a window in the app when the
-      // dock icon is clicked and there are no other windows open.
-      if (mainWindow === null) createWindow();
+// On macOS, re-create the window in the app when the dock icon is clicked and there are no other windows open
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    // Create a new window if none exist
+    mainWindow = new BrowserWindow({
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        enableRemoteModule: false,
+        sandbox: true,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+        nodeIntegration: false,
+      },
+      autoHideMenuBar: true,
+      transparent: true,
+      frame: false,
+      width: 1200,
+      height: 800,
+      minWidth: 800,
+      minHeight: 600,
+      backgroundColor: '#ffffff',
+      icon: path.join(__dirname, 'assets', 'icon.png'),
     });
-  })
-  .catch(console.log);
+
+    mainWindow.loadURL(resolveHtmlPath('index.html'));
+
+    if (process.env.NODE_ENV === 'development') {
+      mainWindow.webContents.openDevTools({ detach: true });
+    }
+
+    mainWindow.on('closed', () => {
+      mainWindow = null;
+    });
+
+    MenuBuilder.buildMenu();
+  }
+});
