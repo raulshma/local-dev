@@ -153,6 +153,17 @@ const Dashboard: React.FC = () => {
         <div className="title-bar-content">
           <span className="app-name">Local Dev Environment</span>
         </div>
+        <div className="window-controls">
+          <button className="window-btn window-minimize" title="Minimize" onClick={() => window.electron?.window?.minimize?.()}>
+            <svg width="10" height="10" viewBox="0 0 10 10"><rect x="2" y="7" width="6" height="1" fill="currentColor"/></svg>
+          </button>
+          <button className="window-btn window-maximize" title="Maximize" onClick={() => window.electron?.window?.maximize?.()}>
+            <svg width="10" height="10" viewBox="0 0 10 10"><rect x="2" y="2" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1"/></svg>
+          </button>
+          <button className="window-btn window-close" title="Close" onClick={() => window.electron?.window?.close?.()}>
+            <svg width="10" height="10" viewBox="0 0 10 10"><line x1="2" y1="2" x2="8" y2="8" stroke="currentColor" strokeWidth="1.2"/><line x1="8" y1="2" x2="2" y2="8" stroke="currentColor" strokeWidth="1.2"/></svg>
+          </button>
+        </div>
       </div>
 
       {error && (
