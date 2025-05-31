@@ -2557,6 +2557,20 @@ const setupIpcHandlers = () => {
       return { success: false, info: null, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
+
+  ipcMain.handle('terminal:interrupt', async (event, id: string) => {
+    try {
+      const terminal = terminalService.terminals.get(id);
+      if (!terminal) {
+        return { success: false, error: 'Terminal not found' };
+      }
+      const success = terminalService.interruptCommand(terminal);
+      return { success };
+    } catch (error) {
+      console.error('Error interrupting terminal command:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
 };
 
 app.on('ready', async () => {

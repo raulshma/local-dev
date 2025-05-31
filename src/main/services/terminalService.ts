@@ -29,10 +29,11 @@ export interface TerminalProcess {
   shell: string;
   isActive: boolean;
   commandBuffer: string;
+  currentCommandProcess?: ChildProcess; // Track the currently running command process
 }
 
 class TerminalService extends EventEmitter {
-  private terminals: Map<string, TerminalProcess> = new Map();
+  public terminals: Map<string, TerminalProcess> = new Map();
   private isWindows: boolean = os.platform() === 'win32';
 
   constructor() {
@@ -156,10 +157,17 @@ class TerminalService extends EventEmitter {
 
       const charCode = data.charCodeAt(0);
 
-      if (charCode === 13) { // Enter key - execute command
+      if (charCode === 3) { // Ctrl+C - interrupt command
+        console.log('Ctrl+C pressed - interrupting command');
+        this.interruptCommand(terminal);
+        return true;
+      } else if (charCode === 13) { // Enter key - execute command
         console.log('Enter pressed - executing command:', terminal.commandBuffer);
         this.executeCommandInTerminal(terminal, terminal.commandBuffer);
         terminal.commandBuffer = '';
+      } else if (charCode === 3) { // Ctrl+C - interrupt running command
+        console.log('Ctrl+C pressed - interrupting command');
+        this.interruptCommand(terminal);
       } else if (charCode === 8 || charCode === 127) { // Backspace
         if (terminal.commandBuffer.length > 0) {
           terminal.commandBuffer = terminal.commandBuffer.slice(0, -1);
@@ -465,6 +473,9 @@ class TerminalService extends EventEmitter {
       });
     }
 
+    // Store the current command process so it can be interrupted
+    terminal.currentCommandProcess = execProcess;
+
     // Handle output - capture both stdout and stderr
     execProcess.stdout?.on('data', (data: Buffer) => {
       const output = data.toString();
@@ -486,6 +497,8 @@ class TerminalService extends EventEmitter {
 
     execProcess.on('close', (code: number | null) => {
       console.log(`Command completed with exit code: ${code}`);
+      // Clear the current command process reference
+      terminal.currentCommandProcess = undefined;
       // Show prompt after command completion
       this.emit('terminalData', {
         id: terminal.id,
@@ -495,11 +508,65 @@ class TerminalService extends EventEmitter {
 
     execProcess.on('error', (error: Error) => {
       console.error(`Command execution error:`, error);
+      // Clear the current command process reference
+      terminal.currentCommandProcess = undefined;
       this.emit('terminalData', {
         id: terminal.id,
         data: `Error: ${error.message}\r\n${terminal.cwd}> `,
       });
     });
+  }
+
+  /**
+   * Interrupt the currently running command in a terminal (Ctrl+C)
+   */
+  public interruptCommand(terminal: TerminalProcess): boolean {
+    if (!terminal || !terminal.isActive) {
+      return false;
+    }
+
+    try {
+      // If there's a running command process, interrupt it
+      if (terminal.currentCommandProcess && !terminal.currentCommandProcess.killed) {
+        console.log(`Interrupting command process in terminal ${terminal.id}`);
+
+        if (this.isWindows) {
+          // On Windows, use taskkill to forcefully terminate the process tree
+          const pid = terminal.currentCommandProcess.pid;
+          if (pid) {
+            spawn('taskkill', ['/pid', pid.toString(), '/T', '/F'], {
+              stdio: 'ignore',
+            });
+          }
+        } else {
+          // On Unix-like systems, send SIGINT
+          terminal.currentCommandProcess.kill('SIGINT');
+        }
+
+        // Clear the current command process reference
+        terminal.currentCommandProcess = undefined;
+
+        // Show ^C in terminal and new prompt
+        this.emit('terminalData', {
+          id: terminal.id,
+          data: `^C\r\n${terminal.cwd}> `,
+        });
+
+        return true;
+      } else {
+        // No running command, just show ^C and clear command buffer
+        terminal.commandBuffer = '';
+        this.emit('terminalData', {
+          id: terminal.id,
+          data: `^C\r\n${terminal.cwd}> `,
+        });
+
+        return true;
+      }
+    } catch (error) {
+      console.error(`Failed to interrupt command in terminal ${terminal.id}:`, error);
+      return false;
+    }
   }
 }
 

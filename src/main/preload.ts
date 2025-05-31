@@ -86,6 +86,7 @@ export type Channels =
   | 'terminal:execute'
   | 'terminal:cd'
   | 'terminal:info'
+  | 'terminal:interrupt'
   | 'terminal:data'
   | 'terminal:exit'
   | 'terminal:error'
@@ -520,6 +521,11 @@ const electronHandler = {
       }>,
     cd: (id: string, directory: string) =>
       ipcRenderer.invoke('terminal:cd', id, directory) as Promise<{
+        success: boolean;
+        error?: string;
+      }>,
+    interrupt: (id: string) =>
+      ipcRenderer.invoke('terminal:interrupt', id) as Promise<{
         success: boolean;
         error?: string;
       }>,
