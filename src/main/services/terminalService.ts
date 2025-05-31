@@ -28,6 +28,7 @@ export interface TerminalProcess {
   cwd: string;
   shell: string;
   isActive: boolean;
+  commandBuffer: string;
 }
 
 class TerminalService extends EventEmitter {
@@ -50,12 +51,12 @@ class TerminalService extends EventEmitter {
       let shellArgs: string[] = [];
 
       if (this.isWindows) {
-        // Windows: Use PowerShell by default
+        // Windows: Use PowerShell for better command execution
         shellPath = shell || 'powershell.exe';
-        if (shellPath.includes('powershell')) {
-          shellArgs = ['-NoLogo', '-NoProfile'];
+        if (shellPath.includes('powershell') || shellPath.includes('pwsh')) {
+          shellArgs = ['-NoLogo', '-NoProfile', '-Command', '-'];
         } else if (shellPath.includes('cmd')) {
-          shellArgs = ['/K'];
+          shellArgs = [];
         }
       } else {
         // Unix-like: Use bash by default
@@ -92,6 +93,7 @@ class TerminalService extends EventEmitter {
         cwd,
         shell: shellPath,
         isActive: true,
+        commandBuffer: '',
       };
 
       this.terminals.set(id, terminal);
@@ -101,10 +103,18 @@ class TerminalService extends EventEmitter {
 
       this.emit('terminalCreated', { id, pid: terminalProcess.pid });
 
+      // Send initial prompt
+      setTimeout(() => {
+        this.emit('terminalData', {
+          id,
+          data: `${terminal.cwd}> `,
+        });
+      }, 500);
+
       return true;
     } catch (error) {
       console.error('Failed to create terminal:', error);
-      this.emit('terminalError', { id: options.id, error: error.message });
+      this.emit('terminalError', { id: options.id, error: error instanceof Error ? error.message : 'Unknown error' });
       return false;
     }
   }
@@ -115,11 +125,37 @@ class TerminalService extends EventEmitter {
   public writeToTerminal(id: string, data: string): boolean {
     const terminal = this.terminals.get(id);
     if (!terminal || !terminal.isActive) {
+      console.log(`Terminal ${id} not found or not active`);
       return false;
     }
 
     try {
-      terminal.process.stdin?.write(data);
+      console.log(`Writing to terminal ${id}:`, data.charCodeAt(0), data); // Debug log
+
+      const charCode = data.charCodeAt(0);
+
+      if (charCode === 13) { // Enter key - execute command
+        console.log('Enter pressed - executing command:', terminal.commandBuffer);
+        this.executeCommandInTerminal(terminal, terminal.commandBuffer);
+        terminal.commandBuffer = '';
+      } else if (charCode === 8 || charCode === 127) { // Backspace
+        if (terminal.commandBuffer.length > 0) {
+          terminal.commandBuffer = terminal.commandBuffer.slice(0, -1);
+          // Echo backspace
+          this.emit('terminalData', {
+            id,
+            data: '\b \b',
+          });
+        }
+      } else if (charCode >= 32 && charCode <= 126) { // Printable characters
+        terminal.commandBuffer += data;
+        // Echo the character
+        this.emit('terminalData', {
+          id,
+          data: data,
+        });
+      }
+
       return true;
     } catch (error) {
       console.error(`Failed to write to terminal ${id}:`, error);
@@ -278,17 +314,21 @@ class TerminalService extends EventEmitter {
 
     // Handle stdout data
     process.stdout?.on('data', (data: Buffer) => {
+      const output = data.toString();
+      console.log(`Terminal ${id} stdout:`, output); // Debug log
       this.emit('terminalData', {
         id,
-        data: data.toString(),
+        data: output,
       });
     });
 
     // Handle stderr data
     process.stderr?.on('data', (data: Buffer) => {
+      const output = data.toString();
+      console.log(`Terminal ${id} stderr:`, output); // Debug log
       this.emit('terminalData', {
         id,
-        data: data.toString(),
+        data: output,
       });
     });
 
@@ -309,6 +349,78 @@ class TerminalService extends EventEmitter {
       this.emit('terminalError', {
         id,
         error: error.message,
+      });
+    });
+  }
+
+  /**
+   * Execute a command in a terminal and capture output
+   */
+  private executeCommandInTerminal(terminal: TerminalProcess, command: string): void {
+    if (!command.trim()) {
+      // Empty command, just show prompt
+      this.emit('terminalData', {
+        id: terminal.id,
+        data: `\r\n${terminal.cwd}> `,
+      });
+      return;
+    }
+
+    console.log(`Executing command in terminal ${terminal.id}:`, command);
+
+    // Emit the command echo
+    this.emit('terminalData', {
+      id: terminal.id,
+      data: `\r\n`,
+    });
+
+    // Execute the command
+    let execProcess: ChildProcess;
+
+    if (this.isWindows) {
+      // Windows: Use cmd.exe to execute the command
+      execProcess = spawn('cmd.exe', ['/c', command], {
+        cwd: terminal.cwd,
+        env: process.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+    } else {
+      // Unix-like: Use bash
+      execProcess = spawn('/bin/bash', ['-c', command], {
+        cwd: terminal.cwd,
+        env: process.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
+
+    // Handle output
+    execProcess.stdout?.on('data', (data: Buffer) => {
+      this.emit('terminalData', {
+        id: terminal.id,
+        data: data.toString(),
+      });
+    });
+
+    execProcess.stderr?.on('data', (data: Buffer) => {
+      this.emit('terminalData', {
+        id: terminal.id,
+        data: data.toString(),
+      });
+    });
+
+    execProcess.on('close', (code: number | null) => {
+      // Show prompt after command completion
+      this.emit('terminalData', {
+        id: terminal.id,
+        data: `\r\n${terminal.cwd}> `,
+      });
+    });
+
+    execProcess.on('error', (error: Error) => {
+      this.emit('terminalData', {
+        id: terminal.id,
+        data: `Error: ${error.message}\r\n${terminal.cwd}> `,
       });
     });
   }

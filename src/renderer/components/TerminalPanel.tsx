@@ -102,7 +102,14 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
     };    // Set up terminal data handler - send input to backend
     terminal.onData(async (data) => {
       try {
-        await electron.terminal.write(terminalId, data);
+        console.log('Terminal input:', data.charCodeAt(0), data); // Debug log
+
+        const result = await electron.terminal.write(terminalId, data);
+        if (!result.success) {
+          console.error('Failed to write to terminal:', result.error);
+        } else {
+          console.log('Successfully sent to backend:', data.charCodeAt(0));
+        }
       } catch (error) {
         console.error('Failed to write to terminal:', error);
       }
@@ -121,8 +128,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
         console.error('Failed to create terminal:', result.error);
         terminal.writeln(`Error: Failed to create terminal - ${result.error}`);
       } else {
-        terminal.writeln(`Terminal ready`);
+        console.log('Terminal created successfully:', terminalId);
+        terminal.writeln(`Terminal ready (${terminalId})`);
         terminal.writeln(`Working directory: ${cwd || projectPath || 'Current directory'}`);
+        // The backend will send the initial prompt
       }
     } catch (error) {
       console.error('Failed to create terminal:', error);
@@ -216,6 +225,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
       if (activeTerminal) {
         setTimeout(() => {
           activeTerminal.fitAddon.fit();
+          // Ensure terminal is focused after resize
+          activeTerminal.terminal.focus();
           // Notify backend of resize
           handleTerminalResize(activeTerminal.id, activeTerminal.terminal.cols, activeTerminal.terminal.rows);
         }, 100);
@@ -235,7 +246,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
         activeTerminal.terminal.open(terminalContainer as HTMLElement);
         setTimeout(() => {
           activeTerminal.fitAddon.fit();
-        }, 50);
+          // Focus the terminal to enable input
+          activeTerminal.terminal.focus();
+        }, 100);
       }
     }
   }, [activeTerminalId, terminals]);  // Set up terminal event listeners
@@ -244,9 +257,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
     const removeDataListener = electron.ipcRenderer.on('terminal:data', (...args: unknown[]) => {
       const id = args[0] as string;
       const data = args[1] as string;
+      console.log('Terminal output received:', id, data); // Debug log
       const terminal = terminals.find(t => t.id === id);
       if (terminal) {
         terminal.terminal.write(data);
+      } else {
+        console.log('Terminal not found for output:', id);
       }
     });
 
@@ -301,7 +317,16 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
             <div
               key={terminal.id}
               className={`terminal-tab ${terminal.id === activeTerminalId ? 'active' : ''}`}
-              onClick={() => setActiveTerminalId(terminal.id)}
+              onClick={() => {
+                setActiveTerminalId(terminal.id);
+                // Focus the terminal when switching tabs
+                setTimeout(() => {
+                  const activeTerminal = terminals.find(t => t.id === terminal.id);
+                  if (activeTerminal) {
+                    activeTerminal.terminal.focus();
+                  }
+                }, 50);
+              }}
             >
               <span className="terminal-tab-title">{terminal.title}</span>
               <button
@@ -317,7 +342,16 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
           ))}
           <button
             className="terminal-new-tab"
-            onClick={() => createTerminal()}
+            onClick={() => {
+              createTerminal().then((newTerminal) => {
+                if (newTerminal) {
+                  // Focus the new terminal after creation
+                  setTimeout(() => {
+                    newTerminal.terminal.focus();
+                  }, 600);
+                }
+              });
+            }}
             title="New Terminal"
           >
             +
@@ -358,9 +392,17 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
         </div>
       </div>
 
-      {/* Terminal Content */}
+      {      /* Terminal Content */}
       <div className="terminal-content-wrapper">
-        <div className="terminal-content" />
+        <div
+          className="terminal-content"
+          onClick={() => {
+            const activeTerminal = terminals.find(t => t.id === activeTerminalId);
+            if (activeTerminal) {
+              activeTerminal.terminal.focus();
+            }
+          }}
+        />
       </div>
     </div>
   );
