@@ -14,6 +14,7 @@ import {
   TrashIcon
 } from './Icons';
 import { ColorCodedOutput } from './ColorCodedOutput';
+import './ScriptsTab.css';
 
 interface ScriptsTabProps {
   project: Project;
@@ -270,47 +271,57 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
                 className={`script-view-tab ${view.id === activeScriptViewId ? 'active' : ''} ${view.isPinned ? 'pinned' : ''}`}
                 onClick={() => setActiveScriptViewId(view.id)}
               >
-                <span className="tab-name">{view.scriptName}</span>
-                {isScriptRunning(view.scriptId) && <span className="running-indicator"></span>}
-                <button
-                  className="tab-pin-btn"
-                  onClick={(e) => { e.stopPropagation(); togglePinView(view.id); }}
-                  title={view.isPinned ? 'Unpin' : 'Pin'}
-                >
-                  📌
-                </button>
-                <button
-                  className="tab-minimize-btn"
-                  onClick={(e) => { e.stopPropagation(); toggleMinimizeView(view.id); }}
-                  title={view.isMinimized ? 'Restore' : 'Minimize'}
-                >
-                  {view.isMinimized ? '🔼' : '🔽'}
-                </button>
-                <button
-                  className="tab-close-btn"
-                  onClick={(e) => { e.stopPropagation(); closeScriptView(view.id); }}
-                  title="Close"
-                >
-                  ✕
-                </button>
+                <div className="tab-content">
+                  <TerminalIcon size={14} />
+                  <span className="tab-name">{view.scriptName}</span>
+                  {isScriptRunning(view.scriptId) && (
+                    <div className="tab-status running">
+                      <div className="status-indicator"></div>
+                    </div>
+                  )}
+                </div>
+                <div className="tab-actions">
+                  <button
+                    className="btn btn-ghost btn-xs tab-action-btn"
+                    onClick={(e) => { e.stopPropagation(); togglePinView(view.id); }}
+                    title={view.isPinned ? 'Unpin' : 'Pin'}
+                  >
+                    {view.isPinned ? '📌' : '📍'}
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-xs tab-action-btn"
+                    onClick={(e) => { e.stopPropagation(); toggleMinimizeView(view.id); }}
+                    title={view.isMinimized ? 'Restore' : 'Minimize'}
+                  >
+                    {view.isMinimized ? <ChevronUpIcon size={12} /> : <ChevronDownIcon size={12} />}
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-xs tab-action-btn"
+                    onClick={(e) => { e.stopPropagation(); closeScriptView(view.id); }}
+                    title="Close"
+                  >
+                    <CloseIcon size={12} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
           <div className="script-view-controls">
             <button
-              className="btn btn-secondary btn-xs"
+              className="btn btn-ghost btn-sm"
               onClick={() => setViewMode(viewMode === 'split' ? 'tabs' : 'split')}
               title={viewMode === 'split' ? 'Switch to tabs' : 'Switch to split view'}
             >
-              {viewMode === 'split' ? '📑' : '🔀'}
+              {viewMode === 'split' ? '📑' : '🔀'} {viewMode === 'split' ? 'Tabs' : 'Split'}
             </button>
             {runningCount > 0 && (
               <button
-                className="btn btn-danger btn-xs"
+                className="btn btn-danger btn-sm"
                 onClick={stopAllScripts}
                 title={`Stop all running scripts (${runningCount})`}
               >
-                ⏹️ Stop All ({runningCount})
+                <CloseIcon size={14} />
+                Stop All ({runningCount})
               </button>
             )}
           </div>
@@ -341,39 +352,45 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
     const isRunning = isScriptRunning(scriptId);
 
     return (
-      <div className="script-output-panel">
-        <div className="script-output-header">
-          <div className="script-output-title">
+      <div className="dedicated-script-output">
+        <div className="dedicated-output-header">
+          <div className="dedicated-output-title">
             <TerminalIcon size={16} />
-            <span>{scriptName}</span>
-            {isRunning && <span className="status-indicator running">Running</span>}
+            <span className="output-script-name">{scriptName}</span>
+            {isRunning && (
+              <div className="script-status running">
+                <div className="status-indicator"></div>
+                <span>Running</span>
+              </div>
+            )}
           </div>
-          <div className="script-output-actions">
-            <div className="tabs">
+          <div className="dedicated-output-actions">
+            <div className="output-tabs">
               <button
-                className={`tab ${activeTab === 'current' ? 'active' : ''}`}
+                className={`output-tab ${activeTab === 'current' ? 'active' : ''}`}
                 onClick={() => {
                   setScriptViews(prev => prev.map(view =>
                     view.scriptId === scriptId ? { ...view, activeTab: 'current' } : view
                   ));
                 }}
               >
+                <TerminalIcon size={14} />
                 Current
               </button>
               <button
-                className={`tab ${activeTab === 'history' ? 'active' : ''}`}
+                className={`output-tab ${activeTab === 'history' ? 'active' : ''}`}
                 onClick={() => {
                   setScriptViews(prev => prev.map(view =>
                     view.scriptId === scriptId ? { ...view, activeTab: 'history' } : view
                   ));
                 }}
               >
-                History
+                📋 History
               </button>
             </div>
             {output && (
               <button
-                className="btn btn-secondary btn-xs"
+                className="btn btn-ghost btn-xs"
                 onClick={() => clearScriptOutput(`${project.id}:${scriptId}`)}
                 title="Clear output"
               >
@@ -382,31 +399,84 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
             )}
           </div>
         </div>
-        <div className="script-output-content">
+        <div className="dedicated-output-content">
           {activeTab === 'current' ? (
             <ColorCodedOutput
               content={output?.output || 'No output yet...'}
-              className="script-output-content"
+              className="output-viewer"
             />
           ) : (
             <div className="execution-history">
-              {executionHistory
-                .filter(entry => entry.scriptId === scriptId)
-                .map(entry => (
-                  <div key={entry.id} className="history-entry">
-                    <div className="history-entry-header">
-                      <span className="history-timestamp">{formatTimestamp(entry.startTime)}</span>
-                      <span
-                        className="history-status"
-                        style={{ color: getStatusColor(entry.status, entry.exitCode) }}
-                      >
-                        {entry.status} {entry.exitCode !== undefined ? `(${entry.exitCode})` : ''}
-                      </span>
-                      <span className="history-duration">{entry.duration !== undefined ? formatDuration(entry.duration) : 'N/A'}</span>
+              <div className="history-search">
+                <div className="search-input-container">
+                  <SearchIcon size={14} />
+                  <input
+                    type="text"
+                    placeholder="Search execution history..."
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                    className="history-search-input"
+                  />
+                </div>
+                <button
+                  className="btn btn-ghost btn-xs"
+                  onClick={clearExecutionHistory}
+                  title="Clear all history"
+                >
+                  <TrashIcon size={12} />
+                </button>
+              </div>
+              <div className="history-entries">
+                {executionHistory
+                  .filter(entry => entry.scriptId === scriptId)
+                  .filter(entry => {
+                    if (!historySearch.trim()) return true;
+                    const searchLower = historySearch.toLowerCase();
+                    return (
+                      entry.scriptName.toLowerCase().includes(searchLower) ||
+                      entry.command.toLowerCase().includes(searchLower) ||
+                      entry.output.toLowerCase().includes(searchLower)
+                    );
+                  })
+                  .map(entry => (
+                    <div key={entry.id} className={`history-entry status-${entry.status}`}>
+                      <div className="history-entry-header">
+                        <div className="history-meta">
+                          <span
+                            className={`history-status ${entry.status}`}
+                            style={{ color: getStatusColor(entry.status, entry.exitCode) }}
+                          >
+                            {entry.status} {entry.exitCode !== undefined ? `(${entry.exitCode})` : ''}
+                          </span>
+                          <span className="history-time">{formatTimestamp(entry.startTime)}</span>
+                          {entry.duration !== undefined && (
+                            <span className="history-duration">{formatDuration(entry.duration)}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="history-command">
+                        <code>{entry.command}</code>
+                      </div>
+                      {entry.output && (
+                        <div className="history-output">
+                          <ColorCodedOutput content={entry.output} className="output-viewer compact" />
+                        </div>
+                      )}
+                      {entry.error && (
+                        <div className="history-error">
+                          <span className="error-label">Error:</span>
+                          <span className="error-message">{entry.error}</span>
+                        </div>
+                      )}
                     </div>
-                    <ColorCodedOutput content={entry.output} className="script-output-content" />
+                  ))}
+                {executionHistory.filter(entry => entry.scriptId === scriptId).length === 0 && (
+                  <div className="history-empty">
+                    <TerminalIcon size={24} color="var(--vscode-secondary-foreground)" />
+                    <span>No execution history</span>
                   </div>
-                ))}
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -414,430 +484,312 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
     );
   };
 
-  return (
-    <div className="action-section">
-      <div className="section-header-with-actions">
-        <h2 className="section-title">Scripts</h2>
-        <div className="script-actions">
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => refreshAutoScripts(project.id)}
-            title="Refresh auto-detected scripts"
-          >
-            🔄 Refresh Auto-Scripts
-          </button>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => setShowAddModal(true)}
-          >
-            <PlusIcon size={14} />
-            Add Script
-          </button>
-        </div>
-      </div>      {project.scripts.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-icon">
-            <SettingsIcon size={48} color="var(--vscode-secondary-foreground)" />
+  // Render individual script card
+  const renderScriptCard = (script: ProjectScript, isAutoDetected: boolean) => {
+    const isRunning = isScriptRunning(script.id);
+    const output = scriptOutput[script.id];
+
+    return (
+      <div key={script.id} className={`script-card ${isAutoDetected ? 'auto-detected' : 'custom'}`}>
+        <div className="script-card-header">
+          <div className="script-card-info">
+            <div className="script-card-title">
+              <span className="script-name">{script.name}</span>
+              {isAutoDetected && (
+                <span className="script-badge auto">Auto</span>
+              )}
+              {script.projectType && (
+                <span className="script-badge type">{script.projectType}</span>
+              )}
+              {isRunning && (
+                <div className="script-status running">
+                  <div className="status-indicator"></div>
+                  <span>Running</span>
+                </div>
+              )}
+            </div>
+            <div className="script-command">
+              <code>{script.command}</code>
+            </div>
           </div>
-          <div className="empty-state-title">No Scripts Defined</div>
-          <div className="empty-state-description">
-            Add custom scripts to run common development tasks, or let the app auto-detect scripts from your project.
-          </div>
-          <div className="empty-state-actions">
+          <div className="script-card-actions">
             <button
-              className="btn btn-secondary"
-              onClick={() => refreshAutoScripts(project.id)}
+              className={`btn btn-icon ${isRunning ? 'btn-danger' : 'btn-primary'}`}
+              onClick={() => handleScriptAction(script)}
+              title={isRunning ? 'Stop script' : 'Run script'}
             >
-              🔄 Detect Scripts
+              {isRunning ? <CloseIcon size={16} /> : <PlayIcon size={16} />}
+            </button>
+            {output && (
+              <button
+                className="btn btn-icon btn-secondary"
+                onClick={() => toggleScriptOutput(script.id)}
+                title={output.isVisible ? 'Hide output' : 'Show output'}
+              >
+                <TerminalIcon size={16} />
+              </button>
+            )}
+            {!isAutoDetected && (
+              <>
+                <button
+                  className="btn btn-icon btn-ghost"
+                  onClick={() => handleEditScript(script)}
+                  title="Edit script"
+                >
+                  <EditIcon size={16} />
+                </button>
+                <button
+                  className="btn btn-icon btn-ghost"
+                  onClick={() => {
+                    if (window.confirm(`Are you sure you want to delete "${script.name}"?`)) {
+                      onRemoveScript(script.id);
+                    }
+                  }}
+                  title="Delete script"
+                >
+                  <TrashIcon size={16} />
+                </button>
+              </>
+            )}
+            <button
+              className="btn btn-icon btn-ghost"
+              onClick={() => handleScriptClick(script)}
+              title="Open in dedicated view"
+            >
+              <ChevronDownIcon size={16} />
+            </button>
+          </div>
+        </div>
+
+        {output?.isVisible && (
+          <div className="script-output-panel">
+            <div className="script-output-tabs">
+              <button
+                className={`output-tab ${activeOutputTab === 'current' ? 'active' : ''}`}
+                onClick={() => setActiveOutputTab('current')}
+              >
+                <TerminalIcon size={14} />
+                Output
+              </button>
+              <button
+                className={`output-tab ${activeOutputTab === 'history' ? 'active' : ''}`}
+                onClick={() => setActiveOutputTab('history')}
+              >
+                📋 History
+              </button>
+              <div className="output-tab-actions">
+                <button
+                  className="btn btn-ghost btn-xs"
+                  onClick={() => clearScriptOutput(script.id)}
+                  title="Clear current output"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div className="script-output-content">
+              {activeOutputTab === 'current' ? (
+                <ColorCodedOutput
+                  content={output.output || 'No output yet...'}
+                  className="output-viewer"
+                />
+              ) : (
+                <div className="execution-history">
+                  <div className="history-search">
+                    <div className="search-input-container">
+                      <SearchIcon size={14} />
+                      <input
+                        type="text"
+                        placeholder="Search execution history..."
+                        value={historySearch}
+                        onChange={(e) => setHistorySearch(e.target.value)}
+                        className="history-search-input"
+                      />
+                    </div>
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      onClick={clearExecutionHistory}
+                      title="Clear all history"
+                    >
+                      <TrashIcon size={12} />
+                    </button>
+                  </div>
+                  <div className="history-entries">
+                    {filteredHistory
+                      .filter(entry => entry.scriptId === script.id)
+                      .map((entry) => (
+                        <div key={entry.id} className={`history-entry status-${entry.status}`}>
+                          <div className="history-entry-header">
+                            <div className="history-meta">
+                              <span className={`history-status ${entry.status}`}>
+                                {entry.status}
+                              </span>
+                              <span className="history-time">
+                                {formatTimestamp(entry.startTime)}
+                              </span>
+                              {entry.duration && (
+                                <span className="history-duration">
+                                  {formatDuration(entry.duration)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="history-command">
+                            <code>{entry.command}</code>
+                          </div>
+                          {entry.output && (
+                            <div className="history-output">
+                              <ColorCodedOutput
+                                content={entry.output}
+                                className="output-viewer compact"
+                              />
+                            </div>
+                          )}
+                          {entry.error && (
+                            <div className="history-error">
+                              <span className="error-label">Error:</span>
+                              <span className="error-message">{entry.error}</span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    {filteredHistory.filter(entry => entry.scriptId === script.id).length === 0 && (
+                      <div className="history-empty">
+                        <TerminalIcon size={24} color="var(--vscode-secondary-foreground)" />
+                        <span>No execution history</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="scripts-tab">
+      <div className="scripts-header">
+        <div className="scripts-header-content">
+          <div className="scripts-title-group">
+            <TerminalIcon size={16} />
+            <h2 className="scripts-title">Scripts</h2>
+            <div className="scripts-badge">
+              {project.scripts.length}
+            </div>
+          </div>
+          <div className="scripts-toolbar">
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => refreshAutoScripts(project.id)}
+              title="Refresh auto-detected scripts"
+            >
+              <SearchIcon size={14} />
+              Auto-detect
             </button>
             <button
-              className="btn btn-primary"
+              className="btn btn-primary btn-sm"
               onClick={() => setShowAddModal(true)}
+              title="Add custom script"
             >
               <PlusIcon size={14} />
-              Add Manual Script
+              Add Script
             </button>
           </div>
         </div>
-      ) : (
-        <div className="scripts-container">
-          {/* Auto-detected scripts */}
-          {project.scripts.filter(script => script.isAutoDetected).length > 0 && (
-            <div className="scripts-section">
-              <h3 className="scripts-section-title">
-                🤖 Auto-detected Scripts
-                <span className="scripts-count">
-                  ({project.scripts.filter(script => script.isAutoDetected).length})
-                </span>
-              </h3>
-              <div className="scripts-list">
-                {project.scripts
-                  .filter(script => script.isAutoDetected)
-                  .map((script) => {
-                    const isRunning = isScriptRunning(script.id);
-                    const output = scriptOutput[script.id];
-
-                    return (
-                      <div key={script.id} className="script-item auto-detected">
-                        <div className="script-header">
-                          <div className="script-info">
-                            <div className="script-name">
-                              <span className="auto-detected-badge">AUTO</span>
-                              {script.name}
-                              {script.projectType && (
-                                <span className="project-type-badge">{script.projectType}</span>
-                              )}
-                            </div>
-                            <div className="script-command">{script.command}</div>
-                          </div>
-                          <div className="script-actions">
-                            <button
-                              className={`btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm`}
-                              onClick={() => handleScriptAction(script)}
-                              title={isRunning ? 'Stop script' : 'Run script'}
-                            >
-                              {isRunning ? (
-                                <>
-                                  <CloseIcon size={14} />
-                                  Stop
-                                </>
-                              ) : (
-                                <>
-                                  <PlayIcon size={14} />
-                                  Run
-                                </>
-                              )}
-                            </button>
-                            {output && (
-                              <button
-                                className="btn btn-secondary btn-sm"
-                                onClick={() => toggleScriptOutput(script.id)}
-                                title={output.isVisible ? 'Hide output' : 'Show output'}
-                              >
-                                <TerminalIcon size={14} />
-                                {output.isVisible ? (
-                                  <ChevronUpIcon size={14} />
-                                ) : (
-                                  <ChevronDownIcon size={14} />
-                                )}
-                              </button>
-                            )}
-                            <button
-                              className="btn btn-outline btn-sm"
-                              onClick={() => handleScriptClick(script)}
-                              title="Open in tab"
-                            >
-                              📑
-                            </button>
-                          </div>
-                        </div>
-                        {output?.isVisible && (
-                          <div className="script-output">
-                            <div className="script-output-header">
-                              <div className="output-tabs">
-                                <button
-                                  className={`output-tab ${activeOutputTab === 'current' ? 'active' : ''}`}
-                                  onClick={() => setActiveOutputTab('current')}
-                                >
-                                  Current Output
-                                </button>
-                                <button
-                                  className={`output-tab ${activeOutputTab === 'history' ? 'active' : ''}`}
-                                  onClick={() => setActiveOutputTab('history')}
-                                >
-                                  History
-                                </button>
-                              </div>
-                              <div className="output-actions">
-                                {activeOutputTab === 'current' ? (
-                                  <button
-                                    className="btn btn-secondary btn-xs"
-                                    onClick={() => clearScriptOutput(script.id)}
-                                    title="Clear output"
-                                  >
-                                    Clear
-                                  </button>
-                                ) : (
-                                  <button
-                                    className="btn btn-secondary btn-xs"
-                                    onClick={clearExecutionHistory}
-                                    title="Clear execution history"
-                                  >
-                                    <TrashIcon size={12} />
-                                    Clear History
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                            <div className="script-output-content">
-                              {activeOutputTab === 'current' ? (
-                                <ColorCodedOutput
-                                  content={output.output || 'No output yet...'}
-                                  className="script-output-content"
-                                />
-                              ) : (
-                                <div className="execution-history">
-                                  <div className="history-filters">
-                                    <div className="search-box">
-                                      <SearchIcon size={14} />
-                                      <input
-                                        type="text"
-                                        placeholder="Search history..."
-                                        value={historySearch}
-                                        onChange={(e) => setHistorySearch(e.target.value)}
-                                        className="search-input"
-                                      />
-                                    </div>
-                                  </div>
-                                  <div className="history-list">
-                                    {filteredHistory.length === 0 ? (
-                                      <div className="history-empty">No execution history found</div>
-                                    ) : (
-                                      filteredHistory.map((entry) => (
-                                        <div key={entry.id} className={`history-entry ${entry.status}`}>
-                                          <div className="history-entry-header">
-                                            <div className="history-entry-info">
-                                              <span className="history-script-name">{entry.scriptName}</span>
-                                              <span className={`history-status status-${entry.status}`}>
-                                                {entry.status.toUpperCase()}
-                                              </span>
-                                              {entry.duration && (
-                                                <span className="history-duration">
-                                                  {formatDuration(entry.duration)}
-                                                </span>
-                                              )}
-                                            </div>
-                                            <div className="history-entry-time">
-                                              {new Date(entry.startTime).toLocaleString()}
-                                            </div>
-                                          </div>
-                                          <div className="history-entry-command">
-                                            {entry.command}
-                                          </div>
-                                          {entry.output && (
-                                            <div className="history-entry-output">
-                                              <ColorCodedOutput
-                                                content={entry.output}
-                                                className="history-output"
-                                              />
-                                            </div>
-                                          )}
-                                          {entry.error && (
-                                            <div className="history-entry-error">
-                                              <strong>Error:</strong> {entry.error}
-                                            </div>
-                                          )}
-                                        </div>
-                                      ))
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+      </div>      <div className="scripts-body">
+        {project.scripts.length === 0 ? (
+          <div className="scripts-empty-state">
+            <div className="empty-state-icon">
+              <TerminalIcon size={64} color="var(--vscode-secondary-foreground)" />
+            </div>
+            <div className="empty-state-content">
+              <h3 className="empty-state-title">No Scripts Found</h3>
+              <p className="empty-state-description">
+                Get started by adding custom scripts or let us detect them automatically from your project files.
+              </p>
+              <div className="empty-state-actions">
+                <button
+                  className="btn btn-primary"
+                  onClick={() => setShowAddModal(true)}
+                >
+                  <PlusIcon size={16} />
+                  Add Script
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => refreshAutoScripts(project.id)}
+                >
+                  <SearchIcon size={16} />
+                  Auto-detect Scripts
+                </button>
               </div>
             </div>
-          )}
-
-          {/* Manual scripts */}
-          {project.scripts.filter(script => !script.isAutoDetected).length > 0 && (
-            <div className="scripts-section">
-              <h3 className="scripts-section-title">
-                ⚙️ Custom Scripts
-                <span className="scripts-count">
-                  ({project.scripts.filter(script => !script.isAutoDetected).length})
-                </span>
-              </h3>
-              <div className="scripts-list">
-                {project.scripts
-                  .filter(script => !script.isAutoDetected)
-                  .map((script) => {
-                    const isRunning = isScriptRunning(script.id);
-                    const output = scriptOutput[script.id];
-
-                    return (
-                      <div key={script.id} className="script-item">
-                        <div className="script-header">
-                          <div className="script-info">
-                            <div className="script-name">{script.name}</div>
-                            <div className="script-command">{script.command}</div>
-                          </div>
-                          <div className="script-actions">
-                            <button
-                              className={`btn ${isRunning ? 'btn-danger' : 'btn-success'} btn-sm`}
-                              onClick={() => handleScriptAction(script)}
-                              title={isRunning ? 'Stop script' : 'Run script'}
-                            >
-                              {isRunning ? (
-                                <>
-                                  <CloseIcon size={14} />
-                                  Stop
-                                </>
-                              ) : (
-                                <>
-                                  <PlayIcon size={14} />
-                                  Run
-                                </>
-                              )}
-                            </button>
-                            {output && (
-                              <button
-                                className="btn btn-secondary btn-sm"
-                                onClick={() => toggleScriptOutput(script.id)}
-                                title={output.isVisible ? 'Hide output' : 'Show output'}
-                              >
-                                <TerminalIcon size={14} />
-                                {output.isVisible ? (
-                                  <ChevronUpIcon size={14} />
-                                ) : (
-                                  <ChevronDownIcon size={14} />
-                                )}
-                              </button>
-                            )}
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => handleEditScript(script)}
-                              title="Edit script"
-                            >
-                              <EditIcon size={14} />
-                            </button>
-                            <button
-                              className="btn btn-danger btn-sm"
-                              onClick={() => {
-                                if (window.confirm(`Are you sure you want to delete the script "${script.name}"?`)) {
-                                  onRemoveScript(script.id);
-                                }
-                              }}
-                              title="Delete script"
-                            >
-                              <CloseIcon size={14} />
-                            </button>
-                            <button
-                              className="btn btn-outline btn-sm"
-                              onClick={() => handleScriptClick(script)}
-                              title="Open in tab"
-                            >
-                              📑
-                            </button>
-                          </div>
-                        </div>
-                        {output?.isVisible && (
-                          <div className="script-output">
-                            <div className="script-output-header">
-                              <div className="output-tabs">
-                                <button
-                                  className={`output-tab ${activeOutputTab === 'current' ? 'active' : ''}`}
-                                  onClick={() => setActiveOutputTab('current')}
-                                >
-                                  Current Output
-                                </button>
-                                <button
-                                  className={`output-tab ${activeOutputTab === 'history' ? 'active' : ''}`}
-                                  onClick={() => setActiveOutputTab('history')}
-                                >
-                                  History
-                                </button>
-                              </div>
-                              <div className="output-actions">
-                                {activeOutputTab === 'current' ? (
-                                  <button
-                                    className="btn btn-secondary btn-xs"
-                                    onClick={() => clearScriptOutput(script.id)}
-                                    title="Clear output"
-                                  >
-                                    Clear
-                                  </button>
-                                ) : (
-                                  <button
-                                    className="btn btn-secondary btn-xs"
-                                    onClick={clearExecutionHistory}
-                                    title="Clear execution history"
-                                  >
-                                    <TrashIcon size={12} />
-                                    Clear History
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                            <div className="script-output-content">
-                              {activeOutputTab === 'current' ? (
-                                <ColorCodedOutput
-                                  content={output.output || 'No output yet...'}
-                                  className="script-output-content"
-                                />
-                              ) : (
-                                <div className="execution-history">
-                                  <div className="history-filters">
-                                    <div className="search-box">
-                                      <SearchIcon size={14} />
-                                      <input
-                                        type="text"
-                                        placeholder="Search history..."
-                                        value={historySearch}
-                                        onChange={(e) => setHistorySearch(e.target.value)}
-                                        className="search-input"
-                                      />
-                                    </div>
-                                  </div>
-                                  <div className="history-list">
-                                    {filteredHistory.length === 0 ? (
-                                      <div className="history-empty">No execution history found</div>
-                                    ) : (
-                                      filteredHistory.map((entry) => (
-                                        <div key={entry.id} className={`history-entry ${entry.status}`}>
-                                          <div className="history-entry-header">
-                                            <div className="history-entry-info">
-                                              <span className="history-script-name">{entry.scriptName}</span>
-                                              <span className={`history-status status-${entry.status}`}>
-                                                {entry.status.toUpperCase()}
-                                              </span>
-                                              {entry.duration && (
-                                                <span className="history-duration">
-                                                  {formatDuration(entry.duration)}
-                                                </span>
-                                              )}
-                                            </div>
-                                            <div className="history-entry-time">
-                                              {new Date(entry.startTime).toLocaleString()}
-                                            </div>
-                                          </div>
-                                          <div className="history-entry-command">
-                                            {entry.command}
-                                          </div>
-                                          {entry.output && (
-                                            <div className="history-entry-output">
-                                              <ColorCodedOutput
-                                                content={entry.output}
-                                                className="history-output"
-                                              />
-                                            </div>
-                                          )}
-                                          {entry.error && (
-                                            <div className="history-entry-error">
-                                              <strong>Error:</strong> {entry.error}
-                                            </div>
-                                          )}
-                                        </div>
-                                      ))
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+          </div>
+        ) : (
+          <div className="scripts-list-container">
+            {/* Auto-detected scripts */}
+            {project.scripts.filter(script => script.isAutoDetected).length > 0 && (
+              <div className="scripts-group">
+                <div className="scripts-group-header">
+                  <div className="scripts-group-title">
+                    <div className="scripts-group-icon auto-detected">
+                      <SearchIcon size={14} />
+                    </div>
+                    <span>Auto-detected Scripts</span>
+                    <span className="scripts-group-count">
+                      {project.scripts.filter(script => script.isAutoDetected).length}
+                    </span>
+                  </div>
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => refreshAutoScripts(project.id)}
+                    title="Refresh auto-detected scripts"
+                  >
+                    <SearchIcon size={12} />
+                  </button>
+                </div>
+                <div className="scripts-grid">
+                  {project.scripts
+                    .filter(script => script.isAutoDetected)
+                    .map((script) => renderScriptCard(script, true))}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+
+            {/* Custom scripts */}
+            {project.scripts.filter(script => !script.isAutoDetected).length > 0 && (
+              <div className="scripts-group">
+                <div className="scripts-group-header">
+                  <div className="scripts-group-title">
+                    <div className="scripts-group-icon custom">
+                      <SettingsIcon size={14} />
+                    </div>
+                    <span>Custom Scripts</span>
+                    <span className="scripts-group-count">
+                      {project.scripts.filter(script => !script.isAutoDetected).length}
+                    </span>
+                  </div>
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => setShowAddModal(true)}
+                    title="Add custom script"
+                  >
+                    <PlusIcon size={12} />
+                  </button>
+                </div>
+                <div className="scripts-grid">
+                  {project.scripts
+                    .filter(script => !script.isAutoDetected)
+                    .map((script) => renderScriptCard(script, false))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Tabbed Script View */}
       {renderTabbedScriptView()}
@@ -845,13 +797,16 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
       {/* Add/Edit Script Modal */}
       {showAddModal && (
         <div className="modal-overlay" onClick={handleCloseModal}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="script-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">
-                {editingScript ? 'Edit Script' : 'Add New Script'}
-              </h3>
+              <div className="modal-title-group">
+                <TerminalIcon size={16} />
+                <h3 className="modal-title">
+                  {editingScript ? 'Edit Script' : 'Add New Script'}
+                </h3>
+              </div>
               <button
-                className="modal-close"
+                className="btn btn-ghost btn-icon"
                 onClick={handleCloseModal}
                 title="Close"
               >
@@ -892,7 +847,7 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
             </div>
             <div className="modal-footer">
               <button
-                className="btn btn-secondary"
+                className="btn btn-ghost"
                 onClick={handleCloseModal}
               >
                 Cancel
