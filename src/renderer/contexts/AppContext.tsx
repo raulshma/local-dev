@@ -475,9 +475,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       if (result.success) {
         // Add to running scripts for UI feedback
         setRunningScripts(prev => new Set(prev).add(`${projectId}:auto-dev`));
-
-        // Show success message with detected command
-        console.log(`Started dev server: ${result.command} (${result.projectType})`);
       } else {
         setError(result.error || 'Failed to start development server');
       }

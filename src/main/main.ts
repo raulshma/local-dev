@@ -221,7 +221,6 @@ const initializeStore = () => {
   // Set up terminal service event handlers
   terminalService.on('terminalData', (data) => {
     // Send terminal data to the renderer process
-    console.log('Forwarding terminal data:', data); // Debug log
     if (mainWindow) {
       mainWindow.webContents.send('terminal:data', data.id, data.data);
     }

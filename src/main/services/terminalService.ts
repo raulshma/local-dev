@@ -148,26 +148,18 @@ class TerminalService extends EventEmitter {
   public writeToTerminal(id: string, data: string): boolean {
     const terminal = this.terminals.get(id);
     if (!terminal || !terminal.isActive) {
-      console.log(`Terminal ${id} not found or not active`);
       return false;
     }
 
     try {
-      console.log(`Writing to terminal ${id}:`, data.charCodeAt(0), data); // Debug log
-
       const charCode = data.charCodeAt(0);
 
       if (charCode === 3) { // Ctrl+C - interrupt command
-        console.log('Ctrl+C pressed - interrupting command');
         this.interruptCommand(terminal);
         return true;
       } else if (charCode === 13) { // Enter key - execute command
-        console.log('Enter pressed - executing command:', terminal.commandBuffer);
         this.executeCommandInTerminal(terminal, terminal.commandBuffer);
         terminal.commandBuffer = '';
-      } else if (charCode === 3) { // Ctrl+C - interrupt running command
-        console.log('Ctrl+C pressed - interrupting command');
-        this.interruptCommand(terminal);
       } else if (charCode === 8 || charCode === 127) { // Backspace
         if (terminal.commandBuffer.length > 0) {
           terminal.commandBuffer = terminal.commandBuffer.slice(0, -1);
@@ -205,7 +197,6 @@ class TerminalService extends EventEmitter {
     try {
       // For basic spawn, we can't resize the PTY, but we can update env vars
       // This is a limitation without node-pty
-      console.log(`Terminal ${id} resize requested: ${cols}x${rows}`);
       return true;
     } catch (error) {
       console.error(`Failed to resize terminal ${id}:`, error);
@@ -351,7 +342,6 @@ class TerminalService extends EventEmitter {
     // Handle stdout data
     process.stdout?.on('data', (data: Buffer) => {
       const output = data.toString();
-      console.log(`Terminal ${id} stdout:`, output); // Debug log
       this.emit('terminalData', {
         id,
         data: output,
@@ -361,7 +351,6 @@ class TerminalService extends EventEmitter {
     // Handle stderr data
     process.stderr?.on('data', (data: Buffer) => {
       const output = data.toString();
-      console.log(`Terminal ${id} stderr:`, output); // Debug log
       this.emit('terminalData', {
         id,
         data: output,
@@ -402,8 +391,6 @@ class TerminalService extends EventEmitter {
       return;
     }
 
-    console.log(`Executing command in terminal ${terminal.id}:`, command);
-
     // Handle special commands and aliases (following IDE pattern of preprocessing)
     let processedCommand = command.trim();
 
@@ -423,7 +410,6 @@ class TerminalService extends EventEmitter {
       if (aliases[baseCommand]) {
         commandParts[0] = aliases[baseCommand];
         processedCommand = commandParts.join(' ');
-        console.log(`Aliased command to: ${processedCommand}`);
       }
     }
 
@@ -438,8 +424,6 @@ class TerminalService extends EventEmitter {
 
     if (this.isWindows) {
       // Windows: Use cmd.exe with /c flag, following the same pattern as IDE opening
-      console.log(`Executing Windows command: cmd.exe /c ${processedCommand}`);
-
       execProcess = spawn('cmd.exe', ['/c', processedCommand], {
         cwd: terminal.cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -458,8 +442,6 @@ class TerminalService extends EventEmitter {
       });
     } else {
       // Unix-like: Use bash with -c flag
-      console.log(`Executing Unix command: /bin/bash -c ${processedCommand}`);
-
       execProcess = spawn('/bin/bash', ['-c', processedCommand], {
         cwd: terminal.cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -479,7 +461,6 @@ class TerminalService extends EventEmitter {
     // Handle output - capture both stdout and stderr
     execProcess.stdout?.on('data', (data: Buffer) => {
       const output = data.toString();
-      console.log(`Terminal ${terminal.id} stdout:`, output);
       this.emit('terminalData', {
         id: terminal.id,
         data: output,
@@ -488,7 +469,6 @@ class TerminalService extends EventEmitter {
 
     execProcess.stderr?.on('data', (data: Buffer) => {
       const output = data.toString();
-      console.log(`Terminal ${terminal.id} stderr:`, output);
       this.emit('terminalData', {
         id: terminal.id,
         data: output,
@@ -496,7 +476,6 @@ class TerminalService extends EventEmitter {
     });
 
     execProcess.on('close', (code: number | null) => {
-      console.log(`Command completed with exit code: ${code}`);
       // Clear the current command process reference
       terminal.currentCommandProcess = undefined;
       // Show prompt after command completion
@@ -528,8 +507,6 @@ class TerminalService extends EventEmitter {
     try {
       // If there's a running command process, interrupt it
       if (terminal.currentCommandProcess && !terminal.currentCommandProcess.killed) {
-        console.log(`Interrupting command process in terminal ${terminal.id}`);
-
         if (this.isWindows) {
           // On Windows, use taskkill to forcefully terminate the process tree
           const pid = terminal.currentCommandProcess.pid;

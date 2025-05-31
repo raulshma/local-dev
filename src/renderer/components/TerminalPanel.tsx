@@ -102,13 +102,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
     };    // Set up terminal data handler - send input to backend
     terminal.onData(async (data) => {
       try {
-        console.log('Terminal input:', data.charCodeAt(0), data); // Debug log
-
         const result = await electron.terminal.write(terminalId, data);
         if (!result.success) {
           console.error('Failed to write to terminal:', result.error);
-        } else {
-          console.log('Successfully sent to backend:', data.charCodeAt(0));
         }
       } catch (error) {
         console.error('Failed to write to terminal:', error);
@@ -128,7 +124,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
         console.error('Failed to create terminal:', result.error);
         terminal.writeln(`Error: Failed to create terminal - ${result.error}`);
       } else {
-        console.log('Terminal created successfully:', terminalId);
         terminal.writeln(`Terminal ready (${terminalId})`);
         terminal.writeln(`Working directory: ${cwd || projectPath || 'Current directory'}`);
         // The backend will send the initial prompt
@@ -257,12 +252,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
     const removeDataListener = electron.ipcRenderer.on('terminal:data', (...args: unknown[]) => {
       const id = args[0] as string;
       const data = args[1] as string;
-      console.log('Terminal output received:', id, data); // Debug log
       const terminal = terminals.find(t => t.id === id);
       if (terminal) {
         terminal.terminal.write(data);
-      } else {
-        console.log('Terminal not found for output:', id);
       }
     });
 
