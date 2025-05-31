@@ -258,9 +258,36 @@
   animation: pulse 1.5s infinite;
 }
 
+.script-status.stopping {
+  color: var(--vscode-charts-yellow);
+}
+
+.script-status.stopping .status-indicator {
+  width: 8px;
+  height: 8px;
+  background-color: var(--vscode-charts-yellow);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Small spinner for buttons */
+.spinner-small {
+  width: 14px;
+  height: 14px;
+  border: 2px solid transparent;
+  border-top: 2px solid currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .script-command {

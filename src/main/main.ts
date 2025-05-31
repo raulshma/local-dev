@@ -84,6 +84,125 @@ const clearScriptExecutionHistory = (projectId: string) => {
   scriptExecutionHistory.delete(projectId);
 };
 
+// Helper function to get all child processes on Windows
+const getChildProcessIds = async (parentPid: number): Promise<number[]> => {
+  return new Promise((resolve) => {
+    exec(`wmic process where "ParentProcessId=${parentPid}" get ProcessId /format:csv`, (error, stdout) => {
+      if (error) {
+        resolve([]);
+        return;
+      }
+
+      const lines = stdout.split('\n');
+      const pids: number[] = [];
+
+      for (const line of lines) {
+        const parts = line.split(',');
+        if (parts.length >= 2) {
+          const pidStr = parts[1]?.trim();
+          const pid = parseInt(pidStr, 10);
+          if (!isNaN(pid) && pid > 0) {
+            pids.push(pid);
+          }
+        }
+      }
+
+      resolve(pids);
+    });
+  });
+};
+
+// Helper function to kill process tree on Windows
+const killProcessTree = async (pid: number): Promise<boolean> => {
+  try {
+    if (process.platform === 'win32') {
+      console.log(`Killing process tree for PID ${pid} on Windows`);
+
+      // Step 1: Get all child processes recursively
+      const allPids = new Set<number>([pid]);
+      const toCheck = [pid];
+
+      while (toCheck.length > 0) {
+        const currentPid = toCheck.pop()!;
+        const childPids = await getChildProcessIds(currentPid);
+
+        for (const childPid of childPids) {
+          if (!allPids.has(childPid)) {
+            allPids.add(childPid);
+            toCheck.push(childPid);
+          }
+        }
+      }
+
+      console.log(`Found ${allPids.size} processes to terminate:`, Array.from(allPids));
+
+      // Step 2: Kill all processes (children first, then parent)
+      const pidsArray = Array.from(allPids);
+      const killPromises = pidsArray.map(pidToKill => {
+        return new Promise<void>((resolve) => {
+          exec(`taskkill /F /PID ${pidToKill}`, (error) => {
+            if (error) {
+              // Only log if it's not a "process not found" error
+              if (!error.message.includes('not found') && !error.message.includes('ERROR: The process')) {
+                console.log(`Failed to kill PID ${pidToKill}:`, error.message);
+              }
+            } else {
+              console.log(`Successfully killed PID ${pidToKill}`);
+            }
+            resolve();
+          });
+        });
+      });
+
+      // Step 3: Also try to kill the entire tree with taskkill /T as backup
+      const treeKillPromise = new Promise<void>((resolve) => {
+        exec(`taskkill /F /T /PID ${pid}`, (error) => {
+          if (error && !error.message.includes('not found') && !error.message.includes('ERROR: The process')) {
+            console.log(`Tree kill for PID ${pid} failed:`, error.message);
+          }
+          resolve();
+        });
+      });
+
+      // Wait for all kill attempts to complete
+      await Promise.all([...killPromises, treeKillPromise]);
+
+      console.log(`Process tree termination completed for PID ${pid}`);
+      return true;
+
+    } else {
+      // On Unix systems, kill the process group
+      try {
+        console.log(`Killing process group ${pid} on Unix`);
+        process.kill(-pid, 'SIGTERM');
+
+        // Wait a bit, then force kill
+        setTimeout(() => {
+          try {
+            process.kill(-pid, 'SIGKILL');
+            console.log(`Force killed process group ${pid}`);
+          } catch (e) {
+            // Process already dead, ignore
+            console.log(`Process group ${pid} already terminated`);
+          }
+        }, 2000);
+
+        return true;
+      } catch (error) {
+        if ((error as any).code === 'ESRCH') {
+          console.log(`Process group ${pid} already terminated`);
+          return true; // Process doesn't exist, consider success
+        }
+        console.log(`Error killing process group ${pid}:`, error);
+        return false;
+      }
+    }
+  } catch (error) {
+    console.error(`Error in killProcessTree for PID ${pid}:`, error);
+    return false;
+  }
+};
+
 // Initialize store service
 const initializeStore = () => {
   storeService = new StoreService();
@@ -531,7 +650,10 @@ const setupIpcHandlers = () => {
       if (runningProcesses.has(processKey)) {
         const existingProcess = runningProcesses.get(processKey);
         console.log(`Stopping existing process for script: ${scriptId}`);
-        existingProcess?.kill('SIGTERM');
+        const existingPid = existingProcess?.pid;
+        if (existingPid) {
+          await killProcessTree(existingPid);
+        }
         runningProcesses.delete(processKey);
       }
 
@@ -556,6 +678,8 @@ const setupIpcHandlers = () => {
             stdio: ['pipe', 'pipe', 'pipe'],
             detached: false, // Keep attached for better process management
             windowsHide: false, // Don't hide windows for scripts that might need UI
+            // Create a new process group for easier termination
+            windowsVerbatimArguments: false,
             env: {
               // Pass essential environment variables but avoid Node.js environment bleeding
               PATH: process.env.PATH,
@@ -569,6 +693,9 @@ const setupIpcHandlers = () => {
               TMP: process.env.TMP,
               USERNAME: process.env.USERNAME,
               COMPUTERNAME: process.env.COMPUTERNAME,
+              // Add Node.js specific environment to help with process management
+              FORCE_COLOR: '0', // Disable colors to avoid terminal issues
+              CI: 'true', // Some tools behave better in CI mode
             }
           });
 
@@ -582,7 +709,7 @@ const setupIpcHandlers = () => {
           throw new Error(`Failed to execute script on Windows: ${windowsSpawnError instanceof Error ? windowsSpawnError.message : 'Unknown error'}`);
         }
       } else {
-        // For non-Windows platforms
+        // For non-Windows platforms, use process groups for better termination
         console.log('Executing script on non-Windows platform');
 
         try {
@@ -590,7 +717,7 @@ const setupIpcHandlers = () => {
             cwd: projectPath,
             shell: true,
             stdio: ['pipe', 'pipe', 'pipe'],
-            detached: false,
+            detached: true, // Create new process group for easier termination
             env: {
               ...process.env, // On non-Windows, keep more of the environment
             }
@@ -599,6 +726,9 @@ const setupIpcHandlers = () => {
           if (!childProcess.pid) {
             throw new Error('Failed to start script process: No PID obtained');
           }
+
+          // Make the child process the leader of a new process group
+          childProcess.unref();
 
           console.log(`Successfully started script process with PID: ${childProcess.pid}`);
         } catch (nonWindowsSpawnError) {
@@ -786,11 +916,11 @@ const setupIpcHandlers = () => {
   ipcMain.handle('script:stop', async (event, projectId: string, scriptId: string) => {
     try {
       const processKey = `${projectId}:${scriptId}`;
-      const process = runningProcesses.get(processKey);
+      const childProcess = runningProcesses.get(processKey);
 
       console.log(`Attempting to stop script: ${scriptId} for project: ${projectId}`);
 
-      if (!process) {
+      if (!childProcess) {
         console.log(`No running process found for script: ${scriptId}`);
         return {
           success: false,
@@ -800,41 +930,27 @@ const setupIpcHandlers = () => {
         };
       }
 
-      console.log(`Terminating process with PID: ${process.pid} for script: ${scriptId}`);
+      const pid = childProcess.pid;
+      if (!pid) {
+        console.log(`No PID found for script: ${scriptId}`);
+        return {
+          success: false,
+          error: 'Process PID not available',
+          scriptId,
+          projectId
+        };
+      }
 
-      // Send SIGTERM first for graceful shutdown
-      process.kill('SIGTERM');
+      console.log(`Terminating process tree with PID: ${pid} for script: ${scriptId}`);
 
-      // Force kill after 5 seconds if not terminated gracefully
-      const forceKillTimeout = setTimeout(() => {
-        if (runningProcesses.has(processKey)) {
-          console.log(`Force killing script process: ${scriptId} (SIGKILL)`);
-          process.kill('SIGKILL');
-          runningProcesses.delete(processKey);
+      // Immediately remove from running processes to prevent race conditions
+      runningProcesses.delete(processKey);
 
-          // Get script name for tray update
-          const script = storeService.getScript(projectId, scriptId);
-          if (script) {
-            trayService.removeRunningScript(script.name);
-          }
-
-          // Send force stopped status
-          if (mainWindow) {
-            mainWindow.webContents.send('script:status', {
-              projectId,
-              scriptId,
-              status: 'force-stopped',
-              message: 'Process was force killed after graceful shutdown timeout'
-            });
-          }
-        }
-      }, 5000);
-
-      // Clear timeout if process terminates gracefully
-      process.on('exit', () => {
-        clearTimeout(forceKillTimeout);
-        console.log(`Script process ${scriptId} terminated gracefully`);
-      });
+      // Get script name for tray update
+      const script = storeService.getScript(projectId, scriptId);
+      if (script) {
+        trayService.removeRunningScript(script.name);
+      }
 
       // Update execution history on stop - find the latest running execution for this script
       const projectHistory = getScriptExecutionHistory(projectId);
@@ -847,9 +963,138 @@ const setupIpcHandlers = () => {
         });
       }
 
+      // Send stopped status immediately
+      if (mainWindow) {
+        mainWindow.webContents.send('script:status', {
+          projectId,
+          scriptId,
+          status: 'stopped',
+          message: 'Script termination initiated'
+        });
+      }
+
+      // Try graceful shutdown first
+      let gracefulShutdown = false;
+
+      // Set up event listener for graceful shutdown detection
+      const onProcessExit = () => {
+        gracefulShutdown = true;
+        console.log(`Script process ${scriptId} terminated gracefully`);
+      };
+
+      // Listen for process exit events
+      childProcess.once('exit', onProcessExit);
+      childProcess.once('close', onProcessExit);
+
+      try {
+        if (process.platform === 'win32') {
+          // On Windows, try CTRL+C first for graceful shutdown
+          childProcess.kill('SIGINT');
+        } else {
+          childProcess.kill('SIGTERM');
+        }
+
+        // Wait for graceful shutdown with timeout
+        const gracefulWaitPromise = new Promise<void>(resolve => {
+          const waitTimeout = setTimeout(() => {
+            if (!gracefulShutdown) {
+              console.log(`Graceful shutdown timeout for script: ${scriptId}`);
+            }
+            resolve();
+          }, 5000); // Increased to 5 seconds for Node.js processes
+
+          // If process exits gracefully, resolve immediately
+          const exitHandler = () => {
+            clearTimeout(waitTimeout);
+            resolve();
+          };
+          childProcess.once('exit', exitHandler);
+          childProcess.once('close', exitHandler);
+        });
+
+        await gracefulWaitPromise;
+
+      } catch (error) {
+        console.log(`Error during graceful shutdown for ${scriptId}:`, error);
+      }
+
+      // Verify if the process is actually gone and check for child processes
+      const processStillExists = await new Promise<boolean>((resolve) => {
+        if (process.platform === 'win32') {
+          exec(`tasklist /FI "PID eq ${pid}"`, (error, stdout) => {
+            if (error || !stdout.includes(`${pid}`)) {
+              resolve(false); // Process is gone
+            } else {
+              resolve(true); // Process still exists
+            }
+          });
+        } else {
+          try {
+            process.kill(pid, 0); // Test if process exists
+            resolve(true); // Process exists
+          } catch (e) {
+            resolve(false); // Process is gone
+          }
+        }
+      });
+
+      // Always check for child processes, even if parent terminated gracefully
+      // This is crucial for tools like pnpm/npm that spawn child processes
+      console.log(`Checking for child processes of PID ${pid}...`);
+      const childPids = await getChildProcessIds(pid);
+
+      // Get all descendant processes recursively
+      const allDescendantPids = new Set<number>(childPids);
+      const toCheck = [...childPids];
+
+      while (toCheck.length > 0) {
+        const currentPid = toCheck.pop()!;
+        const grandChildPids = await getChildProcessIds(currentPid);
+
+        for (const grandChildPid of grandChildPids) {
+          if (!allDescendantPids.has(grandChildPid)) {
+            allDescendantPids.add(grandChildPid);
+            toCheck.push(grandChildPid);
+          }
+        }
+      }
+
+      const hasLivingDescendants = allDescendantPids.size > 0;
+
+      if (hasLivingDescendants) {
+        console.log(`Found ${allDescendantPids.size} descendant processes that need to be killed:`, Array.from(allDescendantPids));
+      }
+
+      // Force kill if:
+      // 1. Graceful shutdown failed OR
+      // 2. Parent process still exists OR
+      // 3. There are living child/descendant processes
+      if (!gracefulShutdown || processStillExists || hasLivingDescendants) {
+        console.log(`Force killing process tree for script: ${scriptId} (graceful: ${gracefulShutdown}, parent exists: ${processStillExists}, descendants: ${hasLivingDescendants})`);
+        try {
+          await killProcessTree(pid);
+
+          // Also kill any remaining descendants directly
+          if (hasLivingDescendants) {
+            console.log(`Killing remaining descendant processes...`);
+            for (const descendantPid of allDescendantPids) {
+              exec(`taskkill /F /PID ${descendantPid}`, (error) => {
+                if (error && !error.message.includes('not found') && !error.message.includes('ERROR: The process')) {
+                  console.log(`Failed to kill descendant PID ${descendantPid}:`, error.message);
+                }
+              });
+            }
+          }
+        } catch (killError) {
+          console.log(`Process tree kill failed:`, killError);
+        }
+      } else {
+        console.log(`Script ${scriptId} terminated gracefully with no remaining processes`);
+      }
+
       return {
         success: true,
-        message: `Termination signal sent to script: ${scriptId}`,
+        message: `Script ${scriptId} has been terminated`,
         scriptId,
         projectId
       };

@@ -7,16 +7,17 @@ interface AppContextType {
   isLoading: boolean;
   error: string | null;
   runningScripts: Set<string>;
+  stoppingScripts: Set<string>;
   scriptOutput: { [scriptId: string]: { output: string; isVisible: boolean } };
   environmentConfig: EnvironmentConfig | null;
   environmentLoading: boolean;
-  
+
   // Actions
   loadProjects: () => Promise<void>;
   addProject: (name: string, path: string) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
   selectProject: (id: string) => Promise<void>;
-  
+
   // Script actions
   addScript: (projectId: string, script: { name: string; command: string }) => Promise<void>;
   removeScript: (projectId: string, scriptId: string) => Promise<void>;
@@ -33,11 +34,11 @@ interface AppContextType {
   openInIDE: (projectId: string) => Promise<void>;
   openFolder: (projectId: string) => Promise<void>;
   openInTerminal: (projectId: string) => Promise<void>;
-  
+
   // Project settings
   loadProjectSettings: (projectId: string) => Promise<{ projectSettings: any; effectiveSettings: any } | null>;
   saveProjectSettings: (projectId: string, settings: Partial<{ ideCommand: string; terminalCommand: string }>) => Promise<void>;
-  
+
   // Project detection and auto features
   refreshAutoScripts: (projectId: string) => Promise<void>;
   startDevServer: (projectId: string) => Promise<void>;
@@ -63,6 +64,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runningScripts, setRunningScripts] = useState<Set<string>>(new Set());
+  const [stoppingScripts, setStoppingScripts] = useState<Set<string>>(new Set());
   const [scriptOutput, setScriptOutput] = useState<{ [scriptId: string]: { output: string; isVisible: boolean } }>({});
   const [environmentConfig, setEnvironmentConfig] = useState<EnvironmentConfig | null>(null);
   const [environmentLoading, setEnvironmentLoading] = useState(false);
@@ -70,7 +72,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const loadProjects = async () => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const projects = await window.electron.project.list();
       setProjects(projects);
@@ -84,7 +86,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const addProject = async (name: string, path: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       await window.electron.project.add(name, path);
       await loadProjects(); // Reload projects list
@@ -98,7 +100,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const removeProject = async (id: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       await window.electron.project.remove(id);
       await loadProjects(); // Reload projects list      // Clear selection if we removed the selected project
@@ -114,7 +116,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   };
   const selectProject = async (id: string) => {
     setError(null);
-    
+
     try {
       await window.electron.project.select(id);
       const project = projects.find(p => p.id === id);
@@ -131,7 +133,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const addScript = async (projectId: string, script: { name: string; command: string }) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       await window.electron.project.addScript(projectId, script);
       await loadProjects(); // Reload to get updated project with new script
@@ -145,7 +147,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const removeScript = async (projectId: string, scriptId: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       await window.electron.project.removeScript(projectId, scriptId);
       await loadProjects(); // Reload to get updated project
@@ -165,7 +167,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const updateScript = async (projectId: string, script: ProjectScript) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       await window.electron.project.updateScript(projectId, script);
       await loadProjects(); // Reload to get updated project
@@ -178,7 +180,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
   const executeScript = async (projectId: string, scriptId: string) => {
     setError(null);
-    
+
     try {
       await window.electron.script.execute(projectId, scriptId);
       setRunningScripts(prev => new Set(prev).add(`${projectId}:${scriptId}`));
@@ -189,16 +191,37 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
   const stopScript = async (projectId: string, scriptId: string) => {
     setError(null);
-    
+
     try {
+      // Add to stopping scripts immediately for UI feedback
+      setStoppingScripts(prev => {
+        const newSet = new Set(prev);
+        newSet.add(`${projectId}:${scriptId}`);
+        return newSet;
+      });
+
       await window.electron.script.stop(projectId, scriptId);
+
+      // Remove from running and stopping scripts
       setRunningScripts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(`${projectId}:${scriptId}`);
+        return newSet;
+      });
+
+      setStoppingScripts(prev => {
         const newSet = new Set(prev);
         newSet.delete(`${projectId}:${scriptId}`);
         return newSet;
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
+      // Remove from stopping scripts on error
+      setStoppingScripts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(`${projectId}:${scriptId}`);
+        return newSet;
+      });
     }
   };
 
@@ -212,9 +235,9 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const toggleScriptOutput = (scriptId: string) => {
     setScriptOutput(prev => ({
       ...prev,
-      [scriptId]: { 
-        output: prev[scriptId]?.output ?? '', 
-        isVisible: !prev[scriptId]?.isVisible 
+      [scriptId]: {
+        output: prev[scriptId]?.output ?? '',
+        isVisible: !prev[scriptId]?.isVisible
       }
     }));
   };
@@ -233,11 +256,23 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
     const handleScriptStatus = (data: ScriptStatus) => {
       const processKey = `${data.projectId}:${data.scriptId}`;
-      
+
       if (data.status === 'running') {
         setRunningScripts(prev => new Set(prev).add(processKey));
+        // Remove from stopping scripts if it was being stopped
+        setStoppingScripts(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(processKey);
+          return newSet;
+        });
       } else {
         setRunningScripts(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(processKey);
+          return newSet;
+        });
+        // Remove from stopping scripts when process actually stops
+        setStoppingScripts(prev => {
           const newSet = new Set(prev);
           newSet.delete(processKey);
           return newSet;
@@ -281,7 +316,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const loadEnvironment = useCallback(async (projectId: string) => {
     setEnvironmentLoading(true);
     setError(null);
-    
+
     try {
       const result = await window.electron.env.load(projectId);
       if (result.success) {
@@ -303,7 +338,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const saveEnvironment = useCallback(async (projectId: string, variables: Record<string, string>) => {
     setEnvironmentLoading(true);
     setError(null);
-    
+
     try {
       const result = await window.electron.env.save(projectId, variables);
       if (result.success) {
@@ -327,7 +362,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const backupEnvironment = useCallback(async (projectId: string) => {
     setEnvironmentLoading(true);
     setError(null);
-    
+
     try {
       const result = await window.electron.env.backup(projectId);
       if (!result.success) {
@@ -343,7 +378,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   // Quick actions
   const openInIDE = useCallback(async (projectId: string) => {
     setError(null);
-    
+
     try {
       const result = await window.electron.actions.openIDE(projectId);
       if (!result.success) {
@@ -359,7 +394,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
   const openFolder = useCallback(async (projectId: string) => {
     setError(null);
-    
+
     try {
       const result = await window.electron.actions.openFolder(projectId);
       if (!result.success) {
@@ -372,7 +407,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
   const openInTerminal = useCallback(async (projectId: string) => {
     setError(null);
-    
+
     try {
       const result = await window.electron.actions.openTerminal(projectId);
       if (!result.success) {
@@ -384,7 +419,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   }, []);  // Project settings
   const loadProjectSettings = useCallback(async (projectId: string) => {
     setError(null);
-    
+
     try {
       const result = await window.electron.project.getSettings(projectId);
       if (!result.success) {
@@ -402,7 +437,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   }, []);
   const saveProjectSettings = useCallback(async (projectId: string, settings: Partial<{ ideCommand: string; terminalCommand: string }>) => {
     setError(null);
-    
+
     try {
       const result = await window.electron.project.updateSettings(projectId, settings);
       if (!result.success) {
@@ -417,7 +452,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const refreshAutoScripts = useCallback(async (projectId: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const result = await window.electron.project.refreshAutoScripts(projectId);
       if (result.success) {
@@ -434,13 +469,13 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
   const startDevServer = useCallback(async (projectId: string) => {
     setError(null);
-    
+
     try {
       const result = await window.electron.project.startDev(projectId);
       if (result.success) {
         // Add to running scripts for UI feedback
         setRunningScripts(prev => new Set(prev).add(`${projectId}:auto-dev`));
-        
+
         // Show success message with detected command
         console.log(`Started dev server: ${result.command} (${result.projectType})`);
       } else {
@@ -456,6 +491,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     isLoading,
     error,
     runningScripts,
+    stoppingScripts,
     scriptOutput,
     environmentConfig,
     environmentLoading,

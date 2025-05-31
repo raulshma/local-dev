@@ -33,7 +33,7 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
   onExecuteScript,
   onStopScript,
 }) => {
-  const { runningScripts, scriptOutput, clearScriptOutput, toggleScriptOutput, refreshAutoScripts } = useApp();
+  const { runningScripts, stoppingScripts, scriptOutput, clearScriptOutput, toggleScriptOutput, refreshAutoScripts } = useApp();
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingScript, setEditingScript] = useState<ProjectScript | null>(null);
   const [scriptName, setScriptName] = useState('');
@@ -59,6 +59,10 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
 
   const isScriptRunning = (scriptId: string) => {
     return runningScripts.has(`${project.id}:${scriptId}`);
+  };
+
+  const isScriptStopping = (scriptId: string) => {
+    return stoppingScripts.has(`${project.id}:${scriptId}`);
   };
 
   // Load execution history
@@ -487,6 +491,7 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
   // Render individual script card
   const renderScriptCard = (script: ProjectScript, isAutoDetected: boolean) => {
     const isRunning = isScriptRunning(script.id);
+    const isStopping = isScriptStopping(script.id);
     const output = scriptOutput[script.id];
 
     return (
@@ -501,10 +506,16 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
               {script.projectType && (
                 <span className="script-badge type">{script.projectType}</span>
               )}
-              {isRunning && (
+              {isRunning && !isStopping && (
                 <div className="script-status running">
                   <div className="status-indicator"></div>
                   <span>Running</span>
+                </div>
+              )}
+              {isStopping && (
+                <div className="script-status stopping">
+                  <div className="status-indicator stopping"></div>
+                  <span>Stopping...</span>
                 </div>
               )}
             </div>
@@ -514,11 +525,18 @@ const ScriptsTab: React.FC<ScriptsTabProps> = ({
           </div>
           <div className="script-card-actions">
             <button
-              className={`btn btn-icon ${isRunning ? 'btn-danger' : 'btn-primary'}`}
+              className={`btn btn-icon ${isRunning || isStopping ? 'btn-danger' : 'btn-primary'}`}
               onClick={() => handleScriptAction(script)}
-              title={isRunning ? 'Stop script' : 'Run script'}
+              disabled={isStopping}
+              title={isStopping ? 'Stopping...' : isRunning ? 'Stop script' : 'Run script'}
             >
-              {isRunning ? <CloseIcon size={16} /> : <PlayIcon size={16} />}
+              {isStopping ? (
+                <div className="spinner-small"></div>
+              ) : isRunning ? (
+                <CloseIcon size={16} />
+              ) : (
+                <PlayIcon size={16} />
+              )}
             </button>
             {output && (
               <button
