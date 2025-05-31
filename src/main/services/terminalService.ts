@@ -64,15 +64,37 @@ class TerminalService extends EventEmitter {
         shellArgs = ['-l']; // Login shell
       }
 
-      // Combine environment variables
+      // Combine environment variables - following the same pattern as IDE opening
       const processEnv = {
-        ...process.env,
-        ...env,
-        TERM: 'xterm-256color',
+        // Only pass essential environment variables, following IDE opening pattern
+        PATH: process.env.PATH,
         COLUMNS: cols.toString(),
         LINES: rows.toString(),
         PWD: cwd,
       };
+
+      if (this.isWindows) {
+        // Windows-specific environment variables
+        Object.assign(processEnv, {
+          USERPROFILE: process.env.USERPROFILE,
+          APPDATA: process.env.APPDATA,
+          LOCALAPPDATA: process.env.LOCALAPPDATA,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          COMSPEC: process.env.COMSPEC,
+        });
+      } else {
+        // Unix-specific environment variables
+        Object.assign(processEnv, {
+          HOME: process.env.HOME,
+          USER: process.env.USER,
+          SHELL: process.env.SHELL,
+          TERM: 'xterm-256color',
+        });
+      }
+
+      // Add any custom environment variables
+      Object.assign(processEnv, env);
 
       // For Windows, we'll use regular spawn since node-pty is not available
       const terminalProcess = spawn(shellPath, shellArgs, {
@@ -107,7 +129,7 @@ class TerminalService extends EventEmitter {
       setTimeout(() => {
         this.emit('terminalData', {
           id,
-          data: `${terminal.cwd}> `,
+          data: `${cwd}> `,
         });
       }, 500);
 
@@ -286,9 +308,15 @@ class TerminalService extends EventEmitter {
     }
 
     try {
-      const cdCommand = this.isWindows ? `cd "${directory}"\n` : `cd "${directory}"\n`;
-      terminal.process.stdin?.write(cdCommand);
+      // Update the terminal's current working directory
       terminal.cwd = directory;
+
+      // Emit a message to show the directory change
+      this.emit('terminalData', {
+        id,
+        data: `\r\nChanged directory to: ${directory}\r\n${directory}> `,
+      });
+
       return true;
     } catch (error) {
       console.error(`Failed to change directory in terminal ${id}:`, error);
@@ -368,48 +396,96 @@ class TerminalService extends EventEmitter {
 
     console.log(`Executing command in terminal ${terminal.id}:`, command);
 
-    // Emit the command echo
+    // Handle special commands and aliases (following IDE pattern of preprocessing)
+    let processedCommand = command.trim();
+
+    if (this.isWindows) {
+      // Windows command preprocessing - add common aliases
+      const aliases: Record<string, string> = {
+        'ls': 'dir',
+        'pwd': 'cd',
+        'clear': 'cls',
+        'cat': 'type',
+        'which': 'where',
+      };
+
+      const commandParts = processedCommand.split(' ');
+      const baseCommand = commandParts[0].toLowerCase();
+
+      if (aliases[baseCommand]) {
+        commandParts[0] = aliases[baseCommand];
+        processedCommand = commandParts.join(' ');
+        console.log(`Aliased command to: ${processedCommand}`);
+      }
+    }
+
+    // Emit the command echo (newline to go to next line)
     this.emit('terminalData', {
       id: terminal.id,
       data: `\r\n`,
     });
 
-    // Execute the command
+    // Execute the command following the same pattern as IDE opening
     let execProcess: ChildProcess;
 
     if (this.isWindows) {
-      // Windows: Use cmd.exe to execute the command
-      execProcess = spawn('cmd.exe', ['/c', command], {
+      // Windows: Use cmd.exe with /c flag, following the same pattern as IDE opening
+      console.log(`Executing Windows command: cmd.exe /c ${processedCommand}`);
+
+      execProcess = spawn('cmd.exe', ['/c', processedCommand], {
         cwd: terminal.cwd,
-        env: process.env,
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
+        env: {
+          // Only pass essential environment variables, following IDE opening pattern
+          PATH: process.env.PATH,
+          USERPROFILE: process.env.USERPROFILE,
+          APPDATA: process.env.APPDATA,
+          LOCALAPPDATA: process.env.LOCALAPPDATA,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          // Explicitly exclude Node.js related environment variables
+          // that might cause issues
+        }
       });
     } else {
-      // Unix-like: Use bash
-      execProcess = spawn('/bin/bash', ['-c', command], {
+      // Unix-like: Use bash with -c flag
+      console.log(`Executing Unix command: /bin/bash -c ${processedCommand}`);
+
+      execProcess = spawn('/bin/bash', ['-c', processedCommand], {
         cwd: terminal.cwd,
-        env: process.env,
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          // Clean environment for Unix systems too
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+          USER: process.env.USER,
+          SHELL: process.env.SHELL,
+        }
       });
     }
 
-    // Handle output
+    // Handle output - capture both stdout and stderr
     execProcess.stdout?.on('data', (data: Buffer) => {
+      const output = data.toString();
+      console.log(`Terminal ${terminal.id} stdout:`, output);
       this.emit('terminalData', {
         id: terminal.id,
-        data: data.toString(),
+        data: output,
       });
     });
 
     execProcess.stderr?.on('data', (data: Buffer) => {
+      const output = data.toString();
+      console.log(`Terminal ${terminal.id} stderr:`, output);
       this.emit('terminalData', {
         id: terminal.id,
-        data: data.toString(),
+        data: output,
       });
     });
 
     execProcess.on('close', (code: number | null) => {
+      console.log(`Command completed with exit code: ${code}`);
       // Show prompt after command completion
       this.emit('terminalData', {
         id: terminal.id,
@@ -418,6 +494,7 @@ class TerminalService extends EventEmitter {
     });
 
     execProcess.on('error', (error: Error) => {
+      console.error(`Command execution error:`, error);
       this.emit('terminalData', {
         id: terminal.id,
         data: `Error: ${error.message}\r\n${terminal.cwd}> `,
